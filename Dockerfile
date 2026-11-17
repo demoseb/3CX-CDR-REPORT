@@ -20,8 +20,6 @@ EXPOSE 3000
 # Variables d'environnement par défaut (surchargeables via docker-compose / .env)
 ENV PORT=3000
 ENV NODE_ENV=production
-ENV MCP_3CX_URL=https://capb-3cx.communaute-paysbasque.fr/mcp
-ENV MCP_3CX_TOKEN=
 
 # Authentification Entra ID (Microsoft Identity Platform)
 ENV ENTRA_TENANT_ID=

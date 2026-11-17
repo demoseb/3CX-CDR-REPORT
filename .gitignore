@@ -29,3 +29,7 @@ server.log
 server.pid
 *.log
 *.pid
+
+# Base SQLite des utilisateurs (authentification locale)
+data/*.sqlite
+data/

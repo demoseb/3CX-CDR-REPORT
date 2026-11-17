@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import { createServer } from 'http';
 import { Pool } from 'pg';
 import { ConfidentialClientApplication } from '@azure/msal-node';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,10 +23,10 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'changez-moi-en-production'
 
 // ============================================================================
 // Configuration authentification locale (complement d'Entra ID)
+// Les utilisateurs sont stockees dans une base SQLite locale (fichier cdr_users.sqlite)
 // ============================================================================
 const LOCAL_AUTH_ENABLED = process.env.LOCAL_AUTH_ENABLED === 'true';
-const LOCAL_USER = process.env.LOCAL_USER || 'admin';
-const LOCAL_PASSWORD = process.env.LOCAL_PASSWORD || '';
+const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'cdr_users.sqlite');
 
 // Helpers de hashage PBKDF2 par utilisateur
 function generateSalt() {
@@ -34,33 +36,58 @@ function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
 }
 
-// Table des utilisateurs locaux (creee au demarrage si elle n'existe pas)
-async function initUsersTable() {
-  try {
-    await pgPool.query(`
+// Base SQLite pour les utilisateurs locaux (pure JavaScript/WASM, compatible Alpine sans compilation native)
+let sqlDb = null;
+let sqlInitialized = false;
+
+async function initSqlDb() {
+  if (sqlInitialized) return;
+  const initSqlJs = (await import('sql.js')).default;
+  const SQL = await initSqlJs({
+    locateFile: (file) => {
+      return new URL('file:///' + process.cwd() + '/node_modules/sql.js/dist/' + file).href;
+    },
+  });
+
+  // S'assurer que le dossier existe
+  const dbDir = path.dirname(SQLITE_DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+
+  // Ouvrir ou creer la base SQLite
+  if (fs.existsSync(SQLITE_DB_PATH)) {
+    const filebuffer = fs.readFileSync(SQLITE_DB_PATH);
+    sqlDb = new SQL.Database(filebuffer);
+  } else {
+    sqlDb = new SQL.Database();
+    sqlDb.run(`
       CREATE TABLE IF NOT EXISTS cdr_users (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         username VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         role VARCHAR(20) DEFAULT 'user',
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    console.log('Table cdr_users verifie/creee.');
-  } catch (err) {
-    console.error('Erreur creation table cdr_users:', err.message);
+    fs.writeFileSync(SQLITE_DB_PATH, sqlDb.export());
   }
+  sqlInitialized = true;
+  console.log('Base SQLite utilisateurs initialisee : ' + SQLITE_DB_PATH);
 }
 
-async function findUserByUsername(username) {
-  const result = await pgPool.query('SELECT id, username, password_hash, role, created_at FROM cdr_users WHERE username = $1', [username]);
-  return result.rows[0] || null;
+function findUserByUsername(username) {
+  if (!sqlDb) return null;
+  const stmt = sqlDb.prepare('SELECT id, username, password_hash, role, created_at FROM cdr_users WHERE username = ?');
+  const row = stmt.get(username);
+  stmt.free();
+  return row || null;
 }
 
-// Verifie un mot de passe contre un utilisateur de la table cdr_users.
+// Verifie un mot de passe contre un utilisateur de la base SQLite.
 // Le password_hash stocke au format "sel:hash".
-async function verifyLocalUser(username, password) {
-  const user = await findUserByUsername(username);
+function verifyLocalUser(username, password) {
+  const user = findUserByUsername(username);
   if (!user) return null;
   const parts = user.password_hash.split(':');
   if (parts.length !== 2) return null;
@@ -69,16 +96,23 @@ async function verifyLocalUser(username, password) {
   return user;
 }
 
-// Initialise la table des utilisateurs apres creation du pool (appelee plus bas)
-let usersTableInitialized = false;
-async function ensureUsersTable() {
-  if (usersTableInitialized) return;
-  await initUsersTable();
-  usersTableInitialized = true;
+function saveSqlDb() {
+  if (sqlDb && sqlInitialized) {
+    try {
+      fs.writeFileSync(SQLITE_DB_PATH, sqlDb.export());
+    } catch (err) {
+      console.error('Erreur sauvegarde SQLite:', err.message);
+    }
+  }
 }
 
+// Initialiser SQLite au demarrage
+initSqlDb().catch((err) => {
+  console.error('Erreur initialisation SQLite:', err.message);
+});
+
 // ============================================================================
-// Configuration PostgreSQL (base PBX 3CX - rapports CDR directs)
+// Configuration PostgreSQL (base PBX 3CX - rapports CDR directs uniquement)
 // ============================================================================
 const PG_HOST = process.env.PG_HOST || 'localhost';
 const PG_PORT = parseInt(process.env.PG_PORT || '5432', 10);
@@ -104,14 +138,9 @@ pgPool.on('error', (err) => {
   console.error('Erreur inattendue du pool PostgreSQL:', err.message);
 });
 
-// Initialiser la table des utilisateurs une fois le pool pret
-ensureUsersTable();
-
 // ============================================================================
 // Client MSAL (Confidential Client Application - flow Code d'autorisation)
 // ============================================================================
-// Instancie uniquement si les credentials Entra ID sont presentes, afin de
-// permettre le demarrage du serveur meme sans configuration Entra ID.
 let msalClient = null;
 if (ENTRA_CLIENT_ID && ENTRA_CLIENT_SECRET && ENTRA_TENANT_ID) {
   msalClient = new ConfidentialClientApplication({
@@ -210,12 +239,15 @@ app.post('/auth/local', express.json(), async (req, res) => {
     if (!LOCAL_AUTH_ENABLED) {
       return res.status(403).json({ error: 'Authentification locale desactivee.' });
     }
+    if (!sqlInitialized) {
+      return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete, reessayez.' });
+    }
     const { username, password, returnTo } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
     }
 
-    const user = await verifyLocalUser(username, password);
+    const user = verifyLocalUser(username, password);
     if (!user) {
       return res.status(401).json({ error: 'Identifiant ou mot de passe invalide.' });
     }
@@ -339,7 +371,7 @@ app.post('/auth/logout', (req, res) => {
 });
 
 // ============================================================================
-// Routes API (protegees par authentification Entra ID)
+// Routes API
 // ============================================================================
 
 // Indique si un utilisateur est connecte
@@ -404,14 +436,22 @@ app.get('/api/health', (req, res) => {
 });
 
 // ============================================================================
-// Routes d'administration des utilisateurs (admin uniquement)
+// Routes d'administration des utilisateurs (admin uniquement, base SQLite)
 // ============================================================================
 
 // Liste des utilisateurs
-app.get('/api/admin/users', requireAdmin, async (req, res) => {
+app.get('/api/admin/users', requireAdmin, (req, res) => {
   try {
-    const result = await pgPool.query('SELECT id, username, role, created_at FROM cdr_users ORDER BY username');
-    res.json(result.rows);
+    if (!sqlInitialized) {
+      return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete.' });
+    }
+    const stmt = sqlDb.prepare('SELECT id, username, role, created_at FROM cdr_users ORDER BY username');
+    const rows = [];
+    while (stmt.step()) {
+      rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(rows);
   } catch (err) {
     console.error('Erreur liste utilisateurs:', err);
     res.status(500).json({ error: 'Erreur lors de la recuperation des utilisateurs' });
@@ -419,30 +459,41 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
 });
 
 // Creer un utilisateur
-app.post('/api/admin/users', requireAdmin, async (req, res) => {
+app.post('/api/admin/users', requireAdmin, (req, res) => {
   try {
+    if (!sqlInitialized) {
+      return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete.' });
+    }
     const { username, password, role } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
     }
-    const existing = await findUserByUsername(username);
+
+    const existing = findUserByUsername(username);
     if (existing) {
       return res.status(409).json({ error: 'Cet utilisateur existe deja.' });
     }
 
     // Si c'est le premier utilisateur, on le fait admin automatiquement
-    const countResult = await pgPool.query('SELECT COUNT(*) AS cnt FROM cdr_users');
-    const isFirstUser = parseInt(countResult.rows[0].cnt, 10) === 0;
+    const countStmt = sqlDb.prepare('SELECT COUNT(*) AS cnt FROM cdr_users');
+    countStmt.step();
+    const isFirstUser = countStmt.getAsObject().cnt === 0;
+    countStmt.free();
     const userRole = isFirstUser ? 'admin' : (role || 'user');
 
     const salt = generateSalt();
     const passwordHash = salt + ':' + hashPassword(password, salt);
 
-    const result = await pgPool.query(
-      'INSERT INTO cdr_users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role',
-      [username, passwordHash, userRole]
+    const insertStmt = sqlDb.prepare(
+      'INSERT INTO cdr_users (username, password_hash, role) VALUES (?, ?, ?)'
     );
-    res.status(201).json(result.rows[0]);
+    insertStmt.run(username, passwordHash, userRole);
+    insertStmt.free();
+
+    // Recupere l'utilisateur cree
+    const newUser = findUserByUsername(username);
+    saveSqlDb();
+    res.status(201).json({ id: newUser.id, username: newUser.username, role: newUser.role });
   } catch (err) {
     console.error('Erreur creation utilisateur:', err);
     res.status(500).json({ error: 'Erreur lors de la creation de l utilisateur' });
@@ -450,27 +501,33 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
 });
 
 // Modifier un utilisateur (mot de passe et/ou role)
-app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
+app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
   try {
+    if (!sqlInitialized) {
+      return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete.' });
+    }
     const { id } = req.params;
     const { password, role } = req.body || {};
 
-    const user = await pgPool.query('SELECT id FROM cdr_users WHERE id = $1', [id]);
-    if (user.rows.length === 0) {
+    const existing = findUserByUsername(''); // placeholder, on verifie par id ci-dessous
+    const checkStmt = sqlDb.prepare('SELECT id FROM cdr_users WHERE id = ?');
+    checkStmt.step(id);
+    if (!checkStmt.getAsObject()) {
+      checkStmt.free();
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
     }
+    checkStmt.free();
 
     const updates = [];
     const values = [];
-    let paramIdx = 1;
 
     if (password) {
       const salt = generateSalt();
-      updates.push('password_hash = $' + paramIdx++);
+      updates.push('password_hash = ?');
       values.push(salt + ':' + hashPassword(password, salt));
     }
     if (role !== undefined) {
-      updates.push('role = $' + paramIdx++);
+      updates.push('role = ?');
       values.push(role);
     }
 
@@ -479,7 +536,11 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
     }
 
     values.push(id);
-    await pgPool.query('UPDATE cdr_users SET ' + updates.join(', ') + ' WHERE id = $' + paramIdx, values);
+    const updateStmt = sqlDb.prepare('UPDATE cdr_users SET ' + updates.join(', ') + ' WHERE id = ?');
+    updateStmt.run(...values);
+    updateStmt.free();
+
+    saveSqlDb();
     res.json({ ok: true });
   } catch (err) {
     console.error('Erreur modification utilisateur:', err);
@@ -488,17 +549,26 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
 });
 
 // Supprimer un utilisateur
-app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
   try {
+    if (!sqlInitialized) {
+      return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete.' });
+    }
     const { id } = req.params;
     // Empêcher l'auto-suppression
     if (req.session.user && req.session.user.id && ('local:' + id) === req.session.user.id) {
       return res.status(400).json({ error: 'Impossible de supprimer votre propre compte.' });
     }
-    const result = await pgPool.query('DELETE FROM cdr_users WHERE id = $1 RETURNING id', [id]);
-    if (result.rows.length === 0) {
+    const delStmt = sqlDb.prepare('DELETE FROM cdr_users WHERE id = ?');
+    delStmt.run(id);
+    const changes = delStmt.changes();
+    delStmt.free();
+
+    if (changes === 0) {
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
     }
+
+    saveSqlDb();
     res.json({ ok: true });
   } catch (err) {
     console.error('Erreur suppression utilisateur:', err);
@@ -512,4 +582,5 @@ server.listen(PORT, () => {
   console.log('Entra ID configure : ' + Boolean(ENTRA_CLIENT_ID && ENTRA_TENANT_ID && ENTRA_CLIENT_SECRET));
   console.log('Redirect URI Entra ID : ' + ENTRA_REDIRECT_URI);
   console.log('Authentification locale : ' + LOCAL_AUTH_ENABLED);
+  console.log('Base SQLite utilisateurs : ' + SQLITE_DB_PATH);
 });

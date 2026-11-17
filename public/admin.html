@@ -9,8 +9,8 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; }
     header { background: #111827; color: #fff; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     header h1 { font-size: 1.125rem; font-weight: 600; }
-    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #9ca3af; }
-    .chip.admin { background: #dc2626; color: #fee2e2; }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #fff; }
+    .chip.admin { background: #b91c1c; color: #fff; }
     .chip.user { background: #166534; color: #dcfce7; }
     .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
     .user-info { color: #d1d5db; }
@@ -20,8 +20,8 @@
     button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
     button.secondary { background: #e5e7eb; color: #111827; }
     button.secondary:hover { background: #d1d5db; }
-    button.danger { background: #dc2626; color: #fff; }
-    button.danger:hover { background: #b91c1c; }
+    button.danger { background: #b91c1c; color: #fff; }
+    button.danger:hover { background: #991b1b; }
     button.outline { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
     button.outline:hover { background: #eff6ff; }
     button.small { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
@@ -65,7 +65,7 @@
   <span class="chip admin">Admin</span>
   <div class="user-bar">
     <span class="user-info" id="userInfo">Chargement…</span>
-    <a href="cdr.html" class="chip" style="text-decoration:none; color:#9ca3af;">&#8592; Rapports CDR</a>
+    <a href="cdr.html" class="chip" style="text-decoration:none;">&#8592; Rapports CDR</a>
     <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
   </div>
 </header>

@@ -5,12 +5,10 @@ services:
     build: .
     container_name: 3cx-web-interface
     ports:
-      - "3000:3000"
+      - "3999:3000"
     environment:
       - PORT=3000
       - NODE_ENV=production
-      - MCP_3CX_URL=https://capb-3cx.communaute-paysbasque.fr/mcp
-      - MCP_3CX_TOKEN=${MCP_3CX_TOKEN}
       # Base de données PostgreSQL (rapports CDR directs)
       - PG_HOST=${PG_HOST:-localhost}
       - PG_PORT=${PG_PORT:-5432}
@@ -22,11 +20,10 @@ services:
       - ENTRA_TENANT_ID=${ENTRA_TENANT_ID}
       - ENTRA_CLIENT_ID=${ENTRA_CLIENT_ID}
       - ENTRA_CLIENT_SECRET=${ENTRA_CLIENT_SECRET}
-      - ENTRA_REDIRECT_URI=${ENTRA_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      - ENTRA_REDIRECT_URI=${ENTRA_REDIRECT_URI:-http://localhost:3999/auth/callback}
       - ENTRA_SCOPES=${ENTRA_SCOPES:-User.Read}
-      # Authentification locale
+      # Authentification locale (utilisateurs stockés en base SQLite)
       - LOCAL_AUTH_ENABLED=${LOCAL_AUTH_ENABLED:-false}
-      - LOCAL_USER=${LOCAL_USER:-admin}
-      - LOCAL_PASSWORD=${LOCAL_PASSWORD}
+      - SQLITE_DB_PATH=${SQLITE_DB_PATH:-/app/data/cdr_users.sqlite}
       - SESSION_SECRET=${SESSION_SECRET:-changez-moi-en-production}
     restart: unless-stopped

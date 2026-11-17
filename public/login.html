@@ -27,9 +27,9 @@
     .btn.secondary { background: #e5e7eb; color: #111827; }
     .btn.secondary:hover { background: #d1d5db; }
     .btn.entra { background: #0a66c2; }
-    .btn.local { background: #16a34a; }
-    .btn.local:hover { background: #15803d; }
-    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: #9ca3af; font-size: 0.75rem; }
+    .btn.local { background: #15803d; }
+    .btn.local:hover { background: #14532d; }
+    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: #374151; font-size: 0.75rem; }
     .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid #e5e7eb; }
     .footer { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; text-align: center; font-size: 0.8rem; color: #6b7280; }
     .footer a { color: #2563eb; text-decoration: none; }
@@ -55,7 +55,7 @@
 
     <!-- Authentification locale -->
     <div id="localAuth" class="method-card hidden">
-      <h3><span class="icon">&#128274;</span> Compte local</h3>
+      <h2><span class="icon">&#128274;</span> Compte local</h2>
       <div class="field">
         <label>Identifiant</label>
         <input type="text" id="localUser" placeholder="Identifiant" />
@@ -70,7 +70,7 @@
 
     <!-- Authentification Entra ID -->
     <div id="entraAuth" class="method-card hidden">
-      <h3><span class="icon">&#128482;</span> Microsoft Entra ID</h3>
+      <h2><span class="icon">&#128482;</span> Microsoft Entra ID</h2>
       <p style="font-size:0.875rem;color:#6b7280;margin-bottom:0.75rem;">Connectez-vous avec votre compte professionnel Microsoft.</p>
       <button class="btn entra" id="btn-entra-login">Se connecter avec Microsoft Entra ID</button>
     </div>

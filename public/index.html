@@ -9,7 +9,7 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; }
     header { background: #111827; color: #fff; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     header h1 { font-size: 1.125rem; font-weight: 600; }
-    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #9ca3af; }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #fff; }
     .chip.ok { background: #166534; color: #dcfce7; }
     .chip.bad { background: #991b1b; color: #fee2e2; }
     .container { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
@@ -55,7 +55,7 @@
   <strong>MCP 3CX</strong>
   <span class="chip" id="mcp-status">Connexion…</span>
   <span id="token-chip" class="chip" style="margin-left:auto;">Token : non configuré</span>
-  <a href="cdr.html" class="chip" style="margin-left:auto;text-decoration:none;color:#9ca3af;">Rapports CDR &#8594;</a>
+  <a href="cdr.html" class="chip" style="margin-left:auto;text-decoration:none;">Rapports CDR &#8594;</a>
 </header>
 <div class="container">
   <div class="token-card" id="token-card" style="display:none;">
@@ -66,8 +66,7 @@
       <button class="btn" id="token-save">Enregistrer le jeton</button>
       <button class="btn secondary" id="token-clear">Effacer</button>
     </div>
-    <p style="font-size:0.8rem;color:#6b7280;margin-top:0.5rem;">Vous pouvez aussi définir la variable d&#39;environnement <code>MCP_3CX_TOKEN</code> côté serveur pour ne plus avoir à le saisir.</p>
-  </div>
+      </div>
 
   <div id="status" class="status"></div>
 
