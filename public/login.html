@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Connexion - Rapports CDR 3CX</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 1rem; padding: 2rem 2.5rem; width: 100%; max-width: 440px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+    header { margin-bottom: 1.5rem; text-align: center; }
+    header h1 { font-size: 1.25rem; font-weight: 700; color: #111827; }
+    header p { font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem; }
+    .alert { display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.85rem; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .success-msg { display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.85rem; background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .method-card { border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; background: #fff; }
+    .method-card h3 { font-size: 1rem; margin-bottom: 0.75rem; color: #111827; display: flex; align-items: center; gap: 0.5rem; }
+    .method-card h3 .icon { font-size: 1.1rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+    .field label { font-size: 0.75rem; font-weight: 600; color: #374151; }
+    .field input { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.45rem; font-size: 0.9rem; background: #fff; }
+    .field input:focus { outline: none; border-color: #2563eb; }
+    .field small { color: #6b7280; font-size: 0.7rem; }
+    .btn { width: 100%; background: #0a66c2; color: #fff; border: none; padding: 0.75rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.95rem; font-weight: 600; margin-top: 0.5rem; }
+    .btn:hover { background: #004182; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn.secondary { background: #e5e7eb; color: #111827; }
+    .btn.secondary:hover { background: #d1d5db; }
+    .btn.entra { background: #0a66c2; }
+    .btn.local { background: #16a34a; }
+    .btn.local:hover { background: #15803d; }
+    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: #9ca3af; font-size: 0.75rem; }
+    .divider::before, .divider::after { content: ''; flex: 1; border-bottom: 1px solid #e5e7eb; }
+    .footer { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; text-align: center; font-size: 0.8rem; color: #6b7280; }
+    .footer a { color: #2563eb; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .loading { display: none; text-align: center; padding: 1rem; font-size: 0.85rem; color: #6b7280; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .brand { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 800; font-size: 1.1rem; color: #111827; text-decoration: none; margin-bottom: 0.5rem; }
+    .brand .dot { width: 8px; height: 8px; background: #2563eb; border-radius: 50%; }
+    .hidden { display: none; }
+    .note { font-size: 0.8rem; color: #6b7280; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a href="index.html" class="brand"><span class="dot"></span>3CX CDR</a>
+    <header>
+      <h1 id="login-title">Connexion</h1>
+      <p id="login-subtitle">Connectez-vous pour acceder aux rapports CDR.</p>
+    </header>
+    <div id="alert" class="alert"></div>
+    <div id="success" class="success-msg"></div>
+
+    <!-- Authentification locale -->
+    <div id="localAuth" class="method-card hidden">
+      <h3><span class="icon">&#128274;</span> Compte local</h3>
+      <div class="field">
+        <label>Identifiant</label>
+        <input type="text" id="localUser" placeholder="Identifiant" />
+      </div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <input type="password" id="localPass" placeholder="Mot de passe" />
+      </div>
+      <button class="btn local" id="btn-local-login">Se connecter</button>
+      <p class="note">Compte local configure par l administrateur du serveur.</p>
+    </div>
+
+    <!-- Authentification Entra ID -->
+    <div id="entraAuth" class="method-card hidden">
+      <h3><span class="icon">&#128482;</span> Microsoft Entra ID</h3>
+      <p style="font-size:0.875rem;color:#6b7280;margin-bottom:0.75rem;">Connectez-vous avec votre compte professionnel Microsoft.</p>
+      <button class="btn entra" id="btn-entra-login">Se connecter avec Microsoft Entra ID</button>
+    </div>
+
+    <div id="noAuth" class="hidden">
+      <div class="alert">
+        Aucune methode d authentification n est configuree sur ce serveur. Contactez l administrateur.
+      </div>
+    </div>
+
+    <div class="divider"><span>ou</span></div>
+    <div class="loading" id="loading"><span class="spinner"></span>Chargement…</div>
+    <div class="footer">
+      <p>Rapports d appels CDR — Serveur 3CX</p>
+      <p><a href="index.html">Retour aux outils MCP</a></p>
+    </div>
+  </div>
+
+  <script>
+    const alertEl = document.getElementById('alert');
+    const successEl = document.getElementById('success');
+    const localAuthEl = document.getElementById('localAuth');
+    const entraAuthEl = document.getElementById('entraAuth');
+    const noAuthEl = document.getElementById('noAuth');
+    const btnLocal = document.getElementById('btn-local-login');
+    const btnEntra = document.getElementById('btn-entra-login');
+    const loadingEl = document.getElementById('loading');
+
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error');
+    const returnTo = params.get('return') || '/cdr.html';
+    if (error) showAlert('Connexion echec : ' + decodeURIComponent(error));
+
+    function showAlert(text) {
+      alertEl.textContent = text;
+      alertEl.style.display = 'block';
+      successEl.style.display = 'none';
+    }
+    function showSuccess(text) {
+      successEl.textContent = text;
+      successEl.style.display = 'block';
+      alertEl.style.display = 'none';
+    }
+    function setLoading(loading) {
+      loadingEl.style.display = loading ? 'block' : 'none';
+      btnLocal.disabled = loading;
+      btnEntra.disabled = loading;
+    }
+
+    // Recupere les methodes d auth disponibles
+    async function loadAuthConfig() {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+
+        let anyMethod = false;
+        if (data.methods && data.methods.local) {
+          localAuthEl.classList.remove('hidden');
+          anyMethod = true;
+        }
+        if (data.methods && data.methods.entra) {
+          entraAuthEl.classList.remove('hidden');
+          anyMethod = true;
+        }
+        if (data.authenticated) {
+          showSuccess('Vous etes deja connecte (' + (data.user && data.user.name ? data.user.name : 'utilisateur') + '). Redirection…');
+          setTimeout(() => { window.location.replace(returnTo); }, 800);
+          return;
+        }
+        if (!anyMethod) {
+          noAuthEl.classList.remove('hidden');
+        }
+      } catch (e) {
+        showAlert('Impossible de contacter le serveur d authentification.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Connexion locale
+    btnLocal.addEventListener('click', async () => {
+      const user = document.getElementById('localUser').value.trim();
+      const pass = document.getElementById('localPass').value.trim();
+      if (!user || !pass) { showAlert('Saisissez identifiant et mot de passe.'); return; }
+      setLoading(true);
+      try {
+        const res = await fetch('/auth/local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showAlert(data.error || 'Identifiant ou mot de passe invalide.');
+          return;
+        }
+        showSuccess('Connexion reussie. Redirection…');
+        setTimeout(() => { window.location.href = data.redirect || returnTo; }, 800);
+      } catch (err) {
+        showAlert('Erreur de connexion : ' + err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // Connexion Entra ID
+    btnEntra.addEventListener('click', () => {
+      window.location.href = '/auth/login?return=' + encodeURIComponent(returnTo);
+    });
+
+    // Appui sur Entree dans le formulaire local
+    document.getElementById('localPass').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') btnLocal.click();
+    });
+
+    loadAuthConfig();
+  </script>
+</body>
+</html>

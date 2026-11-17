@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rapports CDR 3CX</title>
+  <!-- Chart.js pour les graphiques (CDN, aucune dependance native) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <!-- SheetJS pour l'export Excel (CDN, aucune dependance native) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; }
+    header { background: #111827; color: #fff; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    header h1 { font-size: 1.125rem; font-weight: 600; }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #9ca3af; }
+    .chip.ok { background: #166534; color: #dcfce7; }
+    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+    .user-info { color: #d1d5db; }
+    .user-info strong { color: #fff; }
+    button.btn { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    button.btn:hover { background: #1d4ed8; }
+    button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary { background: #e5e7eb; color: #111827; }
+    button.secondary:hover { background: #d1d5db; }
+    button.danger { background: #dc2626; color: #fff; }
+    button.danger:hover { background: #b91c1c; }
+    button.success { background: #16a34a; color: #fff; }
+    button.success:hover { background: #15803d; }
+    button.outline { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+    button.outline:hover { background: #eff6ff; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h3 { font-size: 1rem; margin-bottom: 0.5rem; color: #111827; display: flex; align-items: center; gap: 0.5rem; }
+    .card h3 .icon { font-size: 1.1rem; }
+    .card h4 { font-size: 0.875rem; margin-bottom: 0.35rem; color: #374151; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field label { font-size: 0.75rem; font-weight: 600; color: #374151; }
+    .field input, .field select, .field textarea {
+      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.45rem; font-size: 0.9rem; background: #fff;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #2563eb; }
+    .field small { color: #6b7280; font-size: 0.7rem; }
+    .field-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+    .field-check input { width: auto; }
+    .result { margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: 0.75rem; }
+    .result pre { background: #111827; color: #10b981; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.8rem; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+    .empty { text-align: center; color: #6b7280; padding: 2rem; }
+    .status { padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .status.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .status.warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    table.data { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
+    table.data th, table.data td { border: 1px solid #e5e7eb; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+    table.data th { background: #f3f4f6; font-weight: 600; color: #374151; white-space: nowrap; }
+    table.data tr:nth-child(even) { background: #f9fafb; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; }
+    .badge.ok { background: #dcfce7; color: #166534; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .badge.err { background: #fee2e2; color: #991b1b; }
+    .sql-box { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.75rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.75rem; margin-top: 0.5rem; overflow-x: auto; }
+    .flex { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .hint { font-size: 0.8rem; color: #6b7280; margin-top: 0.25rem; }
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem; }
+    .tab { padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; color: #6b7280; background: #fff; border-bottom: 2px solid transparent; }
+    .tab:hover { color: #2563eb; }
+    .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .chart-container { position: relative; height: 300px; width: 100%; margin-top: 1rem; }
+    .chart-wrap { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+    @media (min-width: 768px) { .chart-wrap { grid-template-columns: 1fr 1fr; } }
+    .saved-reports { max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem; background: #f9fafb; }
+    .saved-item { padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .saved-item:hover { background: #f3f4f6; }
+    .saved-item:last-child { border-bottom: none; }
+    .grouped-fields { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .chip-select { padding: 0.2rem 0.6rem; border: 1px solid #d1d5db; border-radius: 999px; background: #fff; font-size: 0.8rem; cursor: pointer; }
+    .chip-select.active { border-color: #2563eb; background: #eff6ff; color: #2563eb; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>3CX — Rapports CDR</strong>
+  <span class="chip">Call Detail Records</span>
+  <div class="user-bar">
+    <span class="user-info" id="userInfo">Non connecte</span>
+    <a href="index.html" class="chip" style="text-decoration:none; color:#9ca3af;">&#8592; Outils MCP</a>
+    <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
+  </div>
+</header>
+<div class="container">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('detail')">Detail des appels</div>
+    <div class="tab" onclick="switchTab('custom')">Rapport personnalise</div>
+  </div>
+
+  <!-- ========== Onglet Detail des appels ========== -->
+  <div id="tab-detail" class="tab-content active">
+    <div class="toolbar">
+      <button class="btn secondary" id="btn-back-detail" onclick="location.href='index.html'">&#8592; Retour outils</button>
+      <button class="btn success" id="btn-run-detail" disabled>Executer le rapport</button>
+      <button class="btn secondary" id="btn-copy-sql-detail">Copier le SQL</button>
+      <button class="btn secondary" id="btn-clear-detail">Effacer</button>
+    </div>
+
+    <div id="status-detail" class="status"></div>
+
+    <div class="card">
+      <h3><span class="icon">&#128203;</span> Criteres de recherche CDR</h3>
+      <div class="grid">
+        <div class="field">
+          <label>Date debut</label>
+          <input type="datetime-local" id="dateFrom" />
+          <small>Ex: 2026-11-01T00:00</small>
+        </div>
+        <div class="field">
+          <label>Date fin</label>
+          <input type="datetime-local" id="dateTo" />
+          <small>Ex: 2026-11-16T23:59</small>
+        </div>
+        <div class="field">
+          <label>Extension / DN (appelant ou appele)</label>
+          <input type="text" id="extension" placeholder="ex: 1001" />
+          <small>Laissez vide pour toutes les extensions</small>
+        </div>
+        <div class="field">
+          <label>Numero externe</label>
+          <input type="text" id="phoneNumber" placeholder="ex: 0412345678" />
+          <small>Numero appelant ou appele</small>
+        </div>
+        <div class="field">
+          <label>Direction</label>
+          <select id="direction">
+            <option value="">Toutes</option>
+            <option value="incoming">Entrant</option>
+            <option value="outgoing">Sortant</option>
+            <option value="internal">Interne</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Motif de terminaison</label>
+          <select id="termination">
+            <option value="">Tous</option>
+            <option value="dst_participant_terminated">Repondu (destinataire raccroche)</option>
+            <option value="src_participant_terminated">Repondu (appelant raccroche)</option>
+            <option value="cancelle">Annule</option>
+            <option value="rejected">Rejete</option>
+            <option value="timeout">Timeout</option>
+            <option value="redirected">Redirige</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nombre de resultats max</label>
+          <input type="number" id="limit" value="100" min="1" max="1000" />
+        </div>
+      </div>
+      <div class="hint">Les dates sont en heure locale du serveur 3CX. Si vous ne saisissez pas de dates, les 7 derniers jours seront utilises par defaut.</div>
+    </div>
+
+    <div class="card">
+      <h3><span class="icon">&#128202;</span> Requete SQL generee</h3>
+      <div id="sqlPreview-detail" class="sql-box">-- Remplissez les critères ci-dessus pour generer la requete SQL.</div>
+      <div class="flex" style="margin-top: 0.5rem;">
+        <span class="badge" id="rowCountBadge-detail">— lignes estimees</span>
+      </div>
+    </div>
+
+    <div class="result" id="resultSection-detail" style="display:none;">
+      <h3>Resultats du rapport</h3>
+      <div id="resultInfo-detail" class="hint"></div>
+      <div id="resultsTable-detail"></div>
+      <div class="flex" style="margin-top: 0.5rem;">
+        <button class="btn secondary" id="btn-export-csv-detail">Exporter CSV</button>
+        <button class="btn outline" id="btn-export-xlsx-detail">Exporter Excel</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Comment executer ce rapport</h3>
+      <p>Cette interface genere une requete SQL sur la base PBX du 3CX (PostgreSQL). Une fois connecte, cliquez sur <b>Executer le rapport</b> : la requete est envoyee directement a la base PostgreSQL via l'API protegee (<code>/api/cdr/query</code>) et les resultats s'affichent ici.</p>
+    </div>
+  </div>
+
+  <!-- ========== Onglet Rapport personnalise ========== -->
+  <div id="tab-custom" class="tab-content">
+    <div class="toolbar">
+      <button class="btn secondary" id="btn-back-custom" onclick="location.href='index.html'">&#8592; Retour outils</button>
+      <button class="btn success" id="btn-run-custom">Generer le rapport</button>
+      <button class="btn outline" id="btn-export-csv-custom">Exporter CSV</button>
+      <button class="btn outline" id="btn-export-xlsx-custom">Exporter Excel</button>
+      <button class="btn secondary" id="btn-save-report">Enregistrer le rapport</button>
+      <button class="btn secondary" id="btn-clear-custom">Effacer</button>
+    </div>
+
+    <div id="status-custom" class="status"></div>
+
+    <div class="card">
+      <h3><span class="icon">&#128203;</span> Configuration du rapport</h3>
+      <div class="grid">
+        <div class="field" style="grid-column: span 2;">
+          <label>Mesures a afficher (colonnes)</label>
+          <div class="grouped-fields" id="columnsSelect">
+            <!-- rempli par JS -->
+          </div>
+          <small>Cochez les colonnes a inclure dans le rapport.</small>
+        </div>
+        <div class="field">
+          <label>Groupement</label>
+          <select id="groupBy">
+            <option value="none">Aucun (detail des appels)</option>
+            <option value="day">Par jour</option>
+            <option value="extension">Par extension (appelant)</option>
+            <option value="destination">Par extension (appele)</option>
+            <option value="direction">Par direction</option>
+            <option value="termination">Par motif de fin</option>
+            <option value="external">Par numero externe</option>
+          </select>
+          <small>Si un groupement est choisi, les mesures deviennent des indicateurs agreges.</small>
+        </div>
+        <div class="field">
+          <label>Indicateur a agreger</label>
+          <select id="aggMeasure">
+            <option value="count">Nombre d'appels</option>
+            <option value="duration">Duree totale (minutes)</option>
+            <option value="avgDuration">Duree moyenne (minutes)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Type de graphique</label>
+          <select id="chartType">
+            <option value="bar">Barres</option>
+            <option value="line">Ligne</option>
+            <option value="pie">Camembert</option>
+            <option value="none">Aucun graphique</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Date debut</label>
+          <input type="datetime-local" id="dateFromCustom" />
+        </div>
+        <div class="field">
+          <label>Date fin</label>
+          <input type="datetime-local" id="dateToCustom" />
+        </div>
+        <div class="field">
+          <label>Extension / DN</label>
+          <input type="text" id="extensionCustom" placeholder="ex: 1001" />
+        </div>
+        <div class="field">
+          <label>Numero externe</label>
+          <input type="text" id="phoneNumberCustom" placeholder="ex: 0412345678" />
+        </div>
+        <div class="field">
+          <label>Direction</label>
+          <select id="directionCustom">
+            <option value="">Toutes</option>
+            <option value="incoming">Entrant</option>
+            <option value="outgoing">Sortant</option>
+            <option value="internal">Interne</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Motif de terminaison</label>
+          <select id="terminationCustom">
+            <option value="">Tous</option>
+            <option value="dst_participant_terminated">Repondu</option>
+            <option value="cancelle">Annule</option>
+            <option value="rejected">Rejete</option>
+            <option value="timeout">Timeout</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nombre de resultats max</label>
+          <input type="number" id="limitCustom" value="100" min="1" max="5000" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><span class="icon">&#128202;</span> Requete SQL generee</h3>
+      <div id="sqlPreview-custom" class="sql-box">-- Configurez le rapport ci-dessus pour generer la requete SQL.</div>
+    </div>
+
+    <!-- Graphique -->
+    <div id="chartCard" class="card" style="display:none;">
+      <h3><span class="icon">&#128207;</span> Visualisation</h3>
+      <div class="chart-wrap">
+        <div class="chart-container">
+          <canvas id="chartCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resultats -->
+    <div class="result" id="resultSection-custom" style="display:none;">
+      <h3>Resultats du rapport</h3>
+      <div id="resultInfo-custom" class="hint"></div>
+      <div id="resultsTable-custom"></div>
+      <div class="flex" style="margin-top: 0.5rem;">
+        <button class="btn secondary" id="btn-export-csv-custom2">Exporter CSV</button>
+        <button class="btn outline" id="btn-export-xlsx-custom2">Exporter Excel</button>
+      </div>
+    </div>
+
+    <!-- Rapports enregistres -->
+    <div class="card">
+      <h3><span class="icon">&#128196;</span> Rapports enregistres</h3>
+      <p class="hint">Enregistrez vos configurations de rapports pour les recharger plus tard (stocke localement dans votre navigateur).</p>
+      <div class="saved-reports" id="savedReportsList">Aucun rapport enregistre.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   Constantes et configuration des colonnes disponibles (liste blanche)
+   ============================================================================ */
+const COLUMNS = [
+  { key: 'debut_appel', label: 'Debut appel', sql: "c.cdr_started_at", type: 'ts' },
+  { key: 'heure_reponse', label: 'Heure reponse', sql: "c.cdr_answered_at", type: 'ts' },
+  { key: 'fin_appel', label: 'Fin appel', sql: "c.cdr_ended_at", type: 'ts' },
+  { key: 'poste_appelant', label: 'Poste appelant', sql: "c.source_dn_number", type: 'str' },
+  { key: 'nom_appelant', label: 'Nom appelant', sql: "c.source_participant_name", type: 'str' },
+  { key: 'numero_appelant', label: 'Numero appelant', sql: "c.source_participant_phone_number", type: 'str' },
+  { key: 'poste_appele', label: 'Poste appele', sql: "c.destination_dn_number", type: 'str' },
+  { key: 'nom_appele', label: 'Nom appele', sql: "c.destination_participant_name", type: 'str' },
+  { key: 'numero_appele', label: 'Numero appele', sql: "c.destination_participant_phone_number", type: 'str' },
+  { key: 'direction', label: 'Direction', sql: "CASE WHEN c.source_participant_is_incoming THEN 'Entrant' WHEN c.destination_participant_is_incoming THEN 'Sortant' ELSE 'Interne' END", type: 'str' },
+  { key: 'methode_creation', label: 'Methode creation', sql: "c.creation_method", type: 'str' },
+  { key: 'motif_fin', label: 'Motif fin', sql: "c.termination_reason", type: 'str' },
+  { key: 'duree_minutes', label: 'Duree (min)', sql: "EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60", type: 'num' },
+  { key: 'tarif_source', label: 'Tarif source', sql: "b.source_bill_rate", type: 'num' },
+  { key: 'duree_facturable_source', label: 'Duree facturable source', sql: "EXTRACT(EPOCH FROM b.source_bill_duration) / 60", type: 'num' },
+  { key: 'tarif_destination', label: 'Tarif destination', sql: "b.destination_bill_rate", type: 'num' },
+  { key: 'duree_facturable_destination', label: 'Duree facturable dest.', sql: "EXTRACT(EPOCH FROM b.destination_bill_duration) / 60", type: 'num' },
+];
+
+const GROUP_BY_OPTIONS = {
+  none: { label: 'Aucun', sql: null },
+  day: { label: 'Jour', sql: "DATE(c.cdr_started_at)" },
+  extension: { label: 'Extension appelant', sql: "c.source_dn_number" },
+  destination: { label: 'Extension appele', sql: "c.destination_dn_number" },
+  direction: { label: 'Direction', sql: "CASE WHEN c.source_participant_is_incoming THEN 'Entrant' WHEN c.destination_participant_is_incoming THEN 'Sortant' ELSE 'Interne' END" },
+  termination: { label: 'Motif fin', sql: "c.termination_reason" },
+  external: { label: 'Numero externe', sql: "COALESCE(c.source_participant_phone_number, c.destination_participant_phone_number)" },
+};
+
+let chartInstance = null;
+
+/* ============================================================================
+   Utils
+   ============================================================================ */
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function setStatus(elId, text, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'status ' + (kind || 'ok');
+  el.style.display = text ? 'block' : 'none';
+}
+
+function formatDateForSql(dt) {
+  if (!dt) return null;
+  const d = new Date(dt);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().replace('T', ' ').replace('.000Z', '');
+}
+
+/* ============================================================================
+   Onglets
+   ============================================================================ */
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector('.tab[onclick="switchTab(\'' + tab + '\')"]').classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+}
+
+/* ============================================================================
+   Initialisation colonnes (onglet personnalise)
+   ============================================================================ */
+function initColumns() {
+  const container = document.getElementById('columnsSelect');
+  container.innerHTML = '';
+  const defaults = ['debut_appel', 'poste_appelant', 'poste_appele', 'direction', 'duree_minutes'];
+  COLUMNS.forEach(col => {
+    const checked = defaults.includes(col.key) ? 'checked' : '';
+    container.innerHTML += '<label class="field-check"><input type="checkbox" name="col" value="' + col.key + '" ' + checked + '>' + col.label + '</label>';
+  });
+}
+
+/* ============================================================================
+   Generation SQL - onglet Detail
+   ============================================================================ */
+function generateSqlDetail() {
+  const dateFrom = document.getElementById('dateFrom').value;
+  const dateTo = document.getElementById('dateTo').value;
+  const extension = document.getElementById('extension').value.trim();
+  const phoneNumber = document.getElementById('phoneNumber').value.trim();
+  const direction = document.getElementById('direction').value;
+  const termination = document.getElementById('termination').value;
+  const limit = document.getElementById('limit').value.trim() || '100';
+
+  const fromSql = formatDateForSql(dateFrom);
+  const toSql = formatDateForSql(dateTo);
+
+  let whereClauses = [];
+  let params = [];
+  let paramIdx = 1;
+
+  if (fromSql) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(fromSql); }
+  if (toSql) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(toSql); }
+  if (!fromSql && !toSql) {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    whereClauses.push('c.cdr_started_at >= $' + paramIdx++);
+    params.push(sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', ''));
+    whereClauses.push('c.cdr_started_at <= $' + paramIdx++);
+    params.push(now.toISOString().replace('T', ' ').replace('.000Z', ''));
+  }
+  if (extension) {
+    whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + extension + '%');
+    params.push('%' + extension + '%');
+  }
+  if (phoneNumber) {
+    whereClauses.push('(c.source_participant_phone_number ILIKE $' + paramIdx++ + ' OR c.destination_participant_phone_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + phoneNumber + '%');
+    params.push('%' + phoneNumber + '%');
+  }
+  if (direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+  else if (direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+  else if (direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
+  if (termination) { whereClauses.push('c.termination_reason = $' + paramIdx++); params.push(termination); }
+
+  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+  const sql = '-- Rapport CDR 3CX (detail)\nSELECT\n  c.cdr_started_at AS debut_appel,\n  c.cdr_answered_at AS heure_reponse,\n  c.cdr_ended_at AS fin_appel,\n  c.source_dn_number AS poste_appelant,\n  c.source_participant_name AS nom_appelant,\n  c.source_participant_phone_number AS numero_appelant,\n  c.destination_dn_number AS poste_appele,\n  c.destination_participant_name AS nom_appele,\n  c.destination_participant_phone_number AS numero_appele,\n  CASE WHEN c.source_participant_is_incoming THEN \'Entrant\' WHEN c.destination_participant_is_incoming THEN \'Sortant\' ELSE \'Interne\' END AS direction,\n  c.termination_reason AS motif_fin,\n  EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60 AS duree_minutes\nFROM public.cdroutput c\nLEFT JOIN public.cdrbilling b ON b.cdr_id = c.cdr_id\n' + (whereSql ? whereSql + '\n' : '') + 'ORDER BY c.cdr_started_at DESC\nLIMIT ' + limit + ';';
+
+  const sqlWithParams = sql + '\n-- Parametres :\n' + params.map((p, i) => '-- $' + (i + 1) + ' = ' + escapeHtml(String(p))).join('\n');
+  document.getElementById('sqlPreview-detail').textContent = sqlWithParams;
+  document.getElementById('rowCountBadge-detail').textContent = 'Limite : ' + limit + ' lignes';
+  document.getElementById('btn-run-detail').disabled = false;
+  return { sql, params };
+}
+
+/* ============================================================================
+   Generation SQL - onglet Personnalise
+   ============================================================================ */
+function generateSqlCustom() {
+  const dateFrom = document.getElementById('dateFromCustom').value;
+  const dateTo = document.getElementById('dateToCustom').value;
+  const extension = document.getElementById('extensionCustom').value.trim();
+  const phoneNumber = document.getElementById('phoneNumberCustom').value.trim();
+  const direction = document.getElementById('directionCustom').value;
+  const termination = document.getElementById('terminationCustom').value;
+  const limit = document.getElementById('limitCustom').value.trim() || '100';
+  const groupBy = document.getElementById('groupBy').value;
+  const aggMeasure = document.getElementById('aggMeasure').value;
+
+  const fromSql = formatDateForSql(dateFrom);
+  const toSql = formatDateForSql(dateTo);
+
+  let whereClauses = [];
+  let params = [];
+  let paramIdx = 1;
+
+  if (fromSql) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(fromSql); }
+  if (toSql) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(toSql); }
+  if (extension) {
+    whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + extension + '%');
+    params.push('%' + extension + '%');
+  }
+  if (phoneNumber) {
+    whereClauses.push('(c.source_participant_phone_number ILIKE $' + paramIdx++ + ' OR c.destination_participant_phone_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + phoneNumber + '%');
+    params.push('%' + phoneNumber + '%');
+  }
+  if (direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+  else if (direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+  else if (direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
+  if (termination) { whereClauses.push('c.termination_reason = $' + paramIdx++); params.push(termination); }
+  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+  const selectedCols = Array.from(document.querySelectorAll('input[name="col"]:checked')).map(cb => cb.value);
+  const gb = GROUP_BY_OPTIONS[groupBy];
+  const isGrouped = groupBy !== 'none';
+
+  let selectParts = [];
+  let groupParts = [];
+
+  if (isGrouped) {
+    selectParts.push(gb.sql + ' AS groupe');
+    groupParts.push(gb.sql);
+  }
+  selectedCols.forEach(colKey => {
+    const col = COLUMNS.find(c => c.key === colKey);
+    if (!col) return;
+    if (isGrouped && col.type !== 'str') {
+      // mesure numerique : agregation
+      let aggSql;
+      if (aggMeasure === 'count') aggSql = 'COUNT(*)';
+      else if (aggMeasure === 'duration') aggSql = 'SUM(' + col.sql + ')';
+      else if (aggMeasure === 'avgDuration') aggSql = 'AVG(' + col.sql + ')';
+      selectParts.push(aggSql + ' AS ' + colKey);
+    } else {
+      selectParts.push(col.sql + ' AS ' + colKey);
+      if (isGrouped) groupParts.push(col.sql);
+    }
+  });
+
+  if (!isGrouped && selectedCols.length === 0) {
+    selectParts = COLUMNS.map(c => c.sql + ' AS ' + c.key);
+  }
+
+  const selectSql = selectParts.join(',\n  ');
+  const groupSql = groupParts.length ? '\nGROUP BY ' + groupParts.join(', ') : '';
+  const orderSql = isGrouped ? '\nORDER BY groupe' : '\nORDER BY c.cdr_started_at DESC';
+
+  const sql = '-- Rapport CDR 3CX (personnalise)\nSELECT\n  ' + selectSql + '\nFROM public.cdroutput c\nLEFT JOIN public.cdrbilling b ON b.cdr_id = c.cdr_id\n' + (whereSql ? whereSql + '\n' : '') + groupSql + orderSql + '\nLIMIT ' + limit + ';';
+
+  const sqlWithParams = sql + '\n-- Parametres :\n' + params.map((p, i) => '-- $' + (i + 1) + ' = ' + escapeHtml(String(p))).join('\n');
+  document.getElementById('sqlPreview-custom').textContent = sqlWithParams;
+  return { sql, params, isGrouped, selectedCols, groupBy, aggMeasure };
+}
+
+/* ============================================================================
+   Rendu tableau (commun)
+   ============================================================================ */
+function renderTable(containerId, data, infoId, statusId) {
+  const tableEl = document.getElementById(containerId);
+  const infoEl = document.getElementById(infoId);
+  if (!data || !data.rows || data.rows.length === 0) {
+    infoEl.textContent = 'Aucun resultat trouve.';
+    tableEl.innerHTML = '<div class="empty">Aucun appel trouve pour ces critères.</div>';
+    document.getElementById(statusId.replace('status','resultSection')).style.display = 'block';
+    setStatus(statusId, 'Requete executee : 0 resultat.', 'ok');
+    return;
+  }
+  const rows = data.rows;
+  const cols = Object.keys(rows[0]);
+  let html = '<table class="data"><thead><tr>';
+  for (const col of cols) html += '<th>' + escapeHtml(col) + '</th>';
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = row[col];
+      if (val === null || val === undefined) val = '';
+      if (typeof val === 'object') val = JSON.stringify(val);
+      html += '<td>' + escapeHtml(String(val)) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  tableEl.innerHTML = html;
+  infoEl.textContent = rows.length + ' resultat' + (rows.length > 1 ? 's' : '') + ' trouve' + (rows.length > 1 ? 's' : '');
+  document.getElementById(statusId.replace('status','resultSection')).style.display = 'block';
+  setStatus(statusId, 'Requete executee avec succes : ' + rows.length + ' resultat' + (rows.length > 1 ? 's' : ''), 'ok');
+}
+
+/* ============================================================================
+   Graphique Chart.js
+   ============================================================================ */
+function renderChart(data, groupBy, aggMeasure, chartType) {
+  const card = document.getElementById('chartCard');
+  if (chartType === 'none' || !data || !data.rows || data.rows.length === 0) {
+    card.style.display = 'none';
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    return;
+  }
+  card.style.display = 'block';
+
+  const rows = data.rows;
+  const labels = rows.map(r => r.groupe || '');
+  let values = [];
+  if (aggMeasure === 'count') values = rows.map(r => Number(r.count || r.nombre_appels || 0));
+  else if (aggMeasure === 'duration') values = rows.map(r => Number(r.duration || r.duree_totale || 0));
+  else if (aggMeasure === 'avgDuration') values = rows.map(r => Number(r.avgDuration || r.duree_moyenne || 0));
+
+  const ctx = document.getElementById('chartCanvas').getContext('2d');
+  if (chartInstance) chartInstance.destroy();
+
+  const typeMap = { bar: 'bar', line: 'line', pie: 'pie' };
+  chartInstance = new Chart(ctx, {
+    type: typeMap[chartType] || 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: aggMeasure === 'count' ? 'Nombre d appels' : (aggMeasure === 'duration' ? 'Duree totale (min)' : 'Duree moyenne (min)'),
+        data: values,
+        backgroundColor: chartType === 'pie'
+          ? ['#2563eb','#16a34a','#dc2626','#ca8a04','#7c3aed','#0891b2','#be185d','#6b7280']
+          : '#2563eb',
+        borderColor: chartType === 'pie' ? '#fff' : '#2563eb',
+        borderWidth: chartType === 'pie' ? 2 : 1,
+        fill: chartType === 'line'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Repartition par ' + (GROUP_BY_OPTIONS[groupBy] ? GROUP_BY_OPTIONS[groupBy].label : 'groupe') } },
+      scales: chartType === 'pie' ? {} : {
+        y: { beginAtZero: true, title: { display: true, text: aggMeasure === 'count' ? 'Appels' : 'Minutes' } },
+        x: { title: { display: true, text: GROUP_BY_OPTIONS[groupBy] ? GROUP_BY_OPTIONS[groupBy].label : 'Groupe' } }
+      }
+    }
+  });
+}
+
+/* ============================================================================
+   Export CSV
+   ============================================================================ */
+function exportCSV(tableId, filename) {
+  const table = document.getElementById(tableId).querySelector('table.data');
+  if (!table) { setStatus('status-custom', 'Aucun resultat a exporter.', 'err'); return; }
+  const rows = table.querySelectorAll('tr');
+  let csv = [];
+  for (const row of rows) {
+    const cells = row.querySelectorAll('th, td');
+    csv.push(Array.from(cells).map(c => '"' + c.textContent.replace(/"/g, '""') + '"').join(','));
+  }
+  const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'rapport_cdr_3cx.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ============================================================================
+   Export Excel (SheetJS)
+   ============================================================================ */
+function exportXLSX(tableId, filename, sheetName) {
+  const table = document.getElementById(tableId).querySelector('table.data');
+  if (!table) { setStatus('status-custom', 'Aucun resultat a exporter.', 'err'); return; }
+  const rows = table.querySelectorAll('tr');
+  const data = [];
+  for (const row of rows) {
+    const cells = row.querySelectorAll('th, td');
+    data.push(Array.from(cells).map(c => c.textContent));
+  }
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Rapport CDR');
+  XLSX.writeFile(wb, filename || 'rapport_cdr_3cx.xlsx');
+}
+
+/* ============================================================================
+   Executions
+   ============================================================================ */
+async function runDetail() {
+  const { sql, params } = generateSqlDetail();
+  const btn = document.getElementById('btn-run-detail');
+  btn.disabled = true;
+  btn.textContent = 'Execution en cours…';
+  setStatus('status-detail', 'Envoi de la requete a PostgreSQL…', 'warn');
+  try {
+    const res = await fetch('/api/cdr/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    renderTable('resultsTable-detail', data, 'resultInfo-detail', 'status-detail');
+  } catch (err) {
+    setStatus('status-detail', 'Erreur : ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Executer le rapport';
+  }
+}
+
+async function runCustom() {
+  const { sql, params, isGrouped, selectedCols, groupBy, aggMeasure } = generateSqlCustom();
+  const btn = document.getElementById('btn-run-custom');
+  btn.disabled = true;
+  btn.textContent = 'Generation en cours…';
+  setStatus('status-custom', 'Envoi de la requete a PostgreSQL…', 'warn');
+  try {
+    const res = await fetch('/api/cdr/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    // Rendre le tableau avec les colonnes pertinentes
+    const tableEl = document.getElementById('resultsTable-custom');
+    const infoEl = document.getElementById('resultInfo-custom');
+    if (!data || !data.rows || data.rows.length === 0) {
+      infoEl.textContent = 'Aucun resultat trouve.';
+      tableEl.innerHTML = '<div class="empty">Aucun appel trouve pour ces critères.</div>';
+      document.getElementById('resultSection-custom').style.display = 'block';
+      setStatus('status-custom', 'Requete executee : 0 resultat.', 'ok');
+      renderChart(null, groupBy, aggMeasure, document.getElementById('chartType').value);
+      return;
+    }
+    const rows = data.rows;
+    const cols = Object.keys(rows[0]);
+    let html = '<table class="data"><thead><tr>';
+    for (const col of cols) html += '<th>' + escapeHtml(col) + '</th>';
+    html += '</tr></thead><tbody>';
+    for (const row of rows) {
+      html += '<tr>';
+      for (const col of cols) {
+        let val = row[col];
+        if (val === null || val === undefined) val = '';
+        if (typeof val === 'object') val = JSON.stringify(val);
+        html += '<td>' + escapeHtml(String(val)) + '</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    tableEl.innerHTML = html;
+    infoEl.textContent = rows.length + ' resultat' + (rows.length > 1 ? 's' : '') + ' trouve' + (rows.length > 1 ? 's' : '');
+    document.getElementById('resultSection-custom').style.display = 'block';
+    setStatus('status-custom', 'Requete executee avec succes : ' + rows.length + ' resultat' + (rows.length > 1 ? 's' : ''), 'ok');
+    renderChart(data, groupBy, aggMeasure, document.getElementById('chartType').value);
+  } catch (err) {
+    setStatus('status-custom', 'Erreur : ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generer le rapport';
+  }
+}
+
+/* ============================================================================
+   Rapports enregistres (localStorage)
+   ============================================================================ */
+function getSavedReports() {
+  try {
+    const raw = localStorage.getItem('3cx_cdr_saved_reports');
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+function saveReport(report) {
+  const reports = getSavedReports();
+  reports.push({ id: Date.now(), name: report.name, config: report.config, createdAt: new Date().toISOString() });
+  localStorage.setItem('3cx_cdr_saved_reports', JSON.stringify(reports));
+  renderSavedReports();
+}
+function deleteReport(id) {
+  const reports = getSavedReports().filter(r => r.id !== id);
+  localStorage.setItem('3cx_cdr_saved_reports', JSON.stringify(reports));
+  renderSavedReports();
+}
+function loadReport(id) {
+  const report = getSavedReports().find(r => r.id === id);
+  if (!report) return;
+  const c = report.config;
+  // Restaurer les champs du formulaire personnalise
+  if (c.groupBy) document.getElementById('groupBy').value = c.groupBy;
+  if (c.aggMeasure) document.getElementById('aggMeasure').value = c.aggMeasure;
+  if (c.chartType) document.getElementById('chartType').value = c.chartType;
+  if (c.dateFrom) document.getElementById('dateFromCustom').value = c.dateFrom;
+  if (c.dateTo) document.getElementById('dateToCustom').value = c.dateTo;
+  if (c.extension) document.getElementById('extensionCustom').value = c.extension;
+  if (c.phoneNumber) document.getElementById('phoneNumberCustom').value = c.phoneNumber;
+  if (c.direction) document.getElementById('directionCustom').value = c.direction;
+  if (c.termination) document.getElementById('terminationCustom').value = c.termination;
+  if (c.limit) document.getElementById('limitCustom').value = c.limit;
+  // Restaurer colonnes cochees
+  document.querySelectorAll('input[name="col"]').forEach(cb => {
+    cb.checked = c.columns ? c.columns.includes(cb.value) : false;
+  });
+  switchTab('custom');
+  setStatus('status-custom', 'Rapport "' + report.name + '" charge. Cliquez sur Generer le rapport.', 'ok');
+}
+function renderSavedReports() {
+  const container = document.getElementById('savedReportsList');
+  const reports = getSavedReports();
+  if (reports.length === 0) {
+    container.innerHTML = 'Aucun rapport enregistre.';
+    return;
+  }
+  let html = '';
+  for (const r of reports) {
+    html += '<div class="saved-item"><span>' + escapeHtml(r.name) + ' <small>(' + new Date(r.createdAt).toLocaleString() + ')</small></span><div><button class="btn secondary" style="padding:0.15rem 0.4rem;font-size:0.75rem;margin-right:0.25rem;" onclick="loadReport(' + r.id + ')">Charger</button><button class="btn danger" style="padding:0.15rem 0.4rem;font-size:0.75rem;" onclick="deleteReport(' + r.id + ')">Suppr</button></div></div>';
+  }
+  container.innerHTML = html;
+}
+
+/* ============================================================================
+   Evenements
+   ============================================================================ */
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
+  window.location.href = '/login.html';
+});
+
+document.getElementById('btn-run-detail').addEventListener('click', runDetail);
+document.getElementById('btn-copy-sql-detail').addEventListener('click', () => {
+  navigator.clipboard.writeText(document.getElementById('sqlPreview-detail').textContent).then(() => {
+    const b = document.getElementById('btn-copy-sql-detail'); const old = b.textContent; b.textContent = 'Copie !'; setTimeout(() => b.textContent = old, 1000);
+  });
+});
+document.getElementById('btn-clear-detail').addEventListener('click', () => {
+  document.getElementById('dateFrom').value=''; document.getElementById('dateTo').value='';
+  document.getElementById('extension').value=''; document.getElementById('phoneNumber').value='';
+  document.getElementById('direction').value=''; document.getElementById('termination').value='';
+  document.getElementById('limit').value='100';
+  document.getElementById('resultSection-detail').style.display='none';
+  document.getElementById('resultsTable-detail').innerHTML='';
+  document.getElementById('resultInfo-detail').textContent='';
+  setStatus('status-detail','');
+  generateSqlDetail();
+});
+document.querySelectorAll('#tab-detail input, #tab-detail select').forEach(el => {
+  el.addEventListener('change', generateSqlDetail);
+  el.addEventListener('input', generateSqlDetail);
+});
+
+document.getElementById('btn-run-custom').addEventListener('click', runCustom);
+document.getElementById('btn-clear-custom').addEventListener('click', () => {
+  document.getElementById('dateFromCustom').value=''; document.getElementById('dateToCustom').value='';
+  document.getElementById('extensionCustom').value=''; document.getElementById('phoneNumberCustom').value='';
+  document.getElementById('directionCustom').value=''; document.getElementById('terminationCustom').value='';
+  document.getElementById('limitCustom').value='100';
+  document.getElementById('resultSection-custom').style.display='none';
+  document.getElementById('resultsTable-custom').innerHTML='';
+  document.getElementById('resultInfo-custom').textContent='';
+  document.getElementById('chartCard').style.display='none';
+  setStatus('status-custom','');
+  generateSqlCustom();
+});
+document.getElementById('btn-save-report').addEventListener('click', () => {
+  const name = prompt('Nom du rapport :', 'Mon rapport CDR ' + new Date().toLocaleDateString());
+  if (!name) return;
+  const selectedCols = Array.from(document.querySelectorAll('input[name="col"]:checked')).map(cb => cb.value);
+  saveReport({
+    name: name,
+    config: {
+      groupBy: document.getElementById('groupBy').value,
+      aggMeasure: document.getElementById('aggMeasure').value,
+      chartType: document.getElementById('chartType').value,
+      dateFrom: document.getElementById('dateFromCustom').value,
+      dateTo: document.getElementById('dateToCustom').value,
+      extension: document.getElementById('extensionCustom').value,
+      phoneNumber: document.getElementById('phoneNumberCustom').value,
+      direction: document.getElementById('directionCustom').value,
+      termination: document.getElementById('terminationCustom').value,
+      limit: document.getElementById('limitCustom').value,
+      columns: selectedCols,
+    },
+  });
+});
+document.getElementById('btn-export-csv-custom').addEventListener('click', () => exportCSV('resultsTable-custom', 'rapport_cdr_personnalise.csv'));
+document.getElementById('btn-export-xlsx-custom').addEventListener('click', () => exportXLSX('resultsTable-custom', 'rapport_cdr_personnalise.xlsx', 'Rapport'));
+document.getElementById('btn-export-csv-custom2').addEventListener('click', () => exportCSV('resultsTable-custom', 'rapport_cdr_personnalise.csv'));
+document.getElementById('btn-export-xlsx-custom2').addEventListener('click', () => exportXLSX('resultsTable-custom', 'rapport_cdr_personnalise.xlsx', 'Rapport'));
+document.getElementById('btn-export-csv-detail').addEventListener('click', () => exportCSV('resultsTable-detail', 'rapport_cdr_detail.csv'));
+document.getElementById('btn-export-xlsx-detail').addEventListener('click', () => exportXLSX('resultsTable-detail', 'rapport_cdr_detail.xlsx', 'Rapport'));
+
+document.querySelectorAll('#tab-custom input, #tab-custom select').forEach(el => {
+  el.addEventListener('change', generateSqlCustom);
+  el.addEventListener('input', generateSqlCustom);
+});
+
+/* ============================================================================
+   Authentification au chargement
+   ============================================================================ */
+async function checkSession() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data.authenticated) {
+      const u = data.user;
+      document.getElementById('userInfo').textContent = (u.name || u.email || 'Utilisateur') + ' (' + u.email + ')';
+      document.getElementById('userInfo').className = 'user-info';
+      initColumns();
+      generateSqlDetail();
+      generateSqlCustom();
+      renderSavedReports();
+      return;
+    }
+  } catch (e) {}
+  window.location.href = '/login.html?return=' + encodeURIComponent('/cdr.html');
+}
+checkSession();
+</script>
+</body>
+</html>
