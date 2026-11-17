@@ -21,3 +21,11 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Fichiers de travail / runtime (ne pas committer)
+.dockerignore
+oauth-helper.html
+server.log
+server.pid
+*.log
+*.pid

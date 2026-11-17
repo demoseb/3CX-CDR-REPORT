@@ -3,8 +3,6 @@ import session from 'express-session';
 import crypto from 'crypto';
 import { createServer } from 'http';
 import { Pool } from 'pg';
-import { Client } from '@modelcontextprotocol/sdk/client';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ConfidentialClientApplication } from '@azure/msal-node';
 
 const app = express();
@@ -28,22 +26,56 @@ const LOCAL_AUTH_ENABLED = process.env.LOCAL_AUTH_ENABLED === 'true';
 const LOCAL_USER = process.env.LOCAL_USER || 'admin';
 const LOCAL_PASSWORD = process.env.LOCAL_PASSWORD || '';
 
-// Hash PBKDF2 du mot de passe local (pre-calcule au demarrage si auth locale activee)
-let localPasswordHash = null;
-let localPasswordSalt = null;
-if (LOCAL_AUTH_ENABLED && LOCAL_PASSWORD) {
-  localPasswordSalt = crypto.randomBytes(16).toString('hex');
-  localPasswordHash = crypto.pbkdf2Sync(LOCAL_PASSWORD, localPasswordSalt, 100000, 64, 'sha512').toString('hex');
+// Helpers de hashage PBKDF2 par utilisateur
+function generateSalt() {
+  return crypto.randomBytes(16).toString('hex');
+}
+function hashPassword(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
 }
 
-function verifyLocalPassword(password) {
-  if (!localPasswordHash || !localPasswordSalt) return false;
-  const hash = crypto.pbkdf2Sync(password, localPasswordSalt, 100000, 64, 'sha512').toString('hex');
-  return hash === localPasswordHash;
+// Table des utilisateurs locaux (creee au demarrage si elle n'existe pas)
+async function initUsersTable() {
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS cdr_users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('Table cdr_users verifie/creee.');
+  } catch (err) {
+    console.error('Erreur creation table cdr_users:', err.message);
+  }
 }
 
-const MCP_URL = process.env.MCP_3CX_URL || 'https://capb-3cx.communaute-paysbasque.fr/mcp';
-const MCP_TOKEN_ENV = process.env.MCP_3CX_TOKEN || '';
+async function findUserByUsername(username) {
+  const result = await pgPool.query('SELECT id, username, password_hash, role, created_at FROM cdr_users WHERE username = $1', [username]);
+  return result.rows[0] || null;
+}
+
+// Verifie un mot de passe contre un utilisateur de la table cdr_users.
+// Le password_hash stocke au format "sel:hash".
+async function verifyLocalUser(username, password) {
+  const user = await findUserByUsername(username);
+  if (!user) return null;
+  const parts = user.password_hash.split(':');
+  if (parts.length !== 2) return null;
+  const hash = hashPassword(password, parts[0]);
+  if (hash !== parts[1]) return null;
+  return user;
+}
+
+// Initialise la table des utilisateurs apres creation du pool (appelee plus bas)
+let usersTableInitialized = false;
+async function ensureUsersTable() {
+  if (usersTableInitialized) return;
+  await initUsersTable();
+  usersTableInitialized = true;
+}
 
 // ============================================================================
 // Configuration PostgreSQL (base PBX 3CX - rapports CDR directs)
@@ -71,6 +103,9 @@ const pgPool = new Pool({
 pgPool.on('error', (err) => {
   console.error('Erreur inattendue du pool PostgreSQL:', err.message);
 });
+
+// Initialiser la table des utilisateurs une fois le pool pret
+ensureUsersTable();
 
 // ============================================================================
 // Client MSAL (Confidential Client Application - flow Code d'autorisation)
@@ -107,9 +142,9 @@ app.use(session({
   },
 }));
 
-// Sert les fichiers statiques, mais protege /cdr.html par authentification.
+// Sert les fichiers statiques, mais protege /cdr.html et /admin.html par authentification.
 app.use((req, res, next) => {
-  if (req.path === '/cdr.html' && !req.session.user) {
+  if ((req.path === '/cdr.html' || req.path === '/admin.html') && !req.session.user) {
     return res.redirect('/login.html?return=' + encodeURIComponent(req.originalUrl));
   }
   next();
@@ -124,32 +159,20 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// Middleware : exige un administrateur (routes d'administration)
+function requireAdmin(req, res, next) {
+  if (!req.session.user) {
+    return res.status(401).json({ error: 'Non authentifie', loginUrl: '/login.html' });
+  }
+  if (req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+  }
+  next();
+}
+
 // Retourne l'utilisateur connecte (ou null)
 function currentUser(req) {
   return req.session.user || null;
-}
-
-// ============================================================================
-// Resolution du token MCP (priorite header X-MCP-Token, sinon variable d'env)
-// ============================================================================
-function resolveToken(req) {
-  const header = req && req.headers && req.headers['x-mcp-token'];
-  if (header) return String(header);
-  return MCP_TOKEN_ENV;
-}
-
-async function getMcpClient(token) {
-  const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
-    requestInit: {
-      headers: token ? { Authorization: 'Bearer ' + token } : {},
-    },
-  });
-  const client = new Client(
-    { name: '3cx-cdr-reports', version: '1.0.0' },
-    { capabilities: {} }
-  );
-  await client.connect(transport);
-  return client;
 }
 
 // ============================================================================
@@ -182,32 +205,42 @@ app.get('/auth/login', async (req, res) => {
 });
 
 // Connexion avec un compte local (utilisateur/mot de passe confirmes cotes serveur)
-app.post('/auth/local', express.json(), (req, res) => {
+app.post('/auth/local', express.json(), async (req, res) => {
   try {
     if (!LOCAL_AUTH_ENABLED) {
       return res.status(403).json({ error: 'Authentification locale desactivee.' });
     }
-    const { username, password } = req.body || {};
+    const { username, password, returnTo } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
     }
-    if (username !== LOCAL_USER || !verifyLocalPassword(password)) {
+
+    const user = await verifyLocalUser(username, password);
+    if (!user) {
       return res.status(401).json({ error: 'Identifiant ou mot de passe invalide.' });
     }
 
     req.session.user = {
-      id: 'local:' + LOCAL_USER,
-      name: LOCAL_USER,
-      email: LOCAL_USER + '@local',
-      username: LOCAL_USER,
+      id: 'local:' + user.id,
+      name: user.username,
+      email: user.username + '@local',
+      username: user.username,
       authProvider: 'local',
+      role: user.role,
     };
     req.session.authState = undefined;
     req.session.authReturnTo = undefined;
 
-    const returnTo = req.session.authReturnTo || '/cdr.html';
+    const redirectUrl = returnTo || req.session.authReturnTo || '/cdr.html';
     req.session.authReturnTo = undefined;
-    res.json({ ok: true, redirect: returnTo });
+
+    req.session.save((err) => {
+      if (err) {
+        console.error('Erreur sauvegarde session locale:', err);
+        return res.status(500).json({ error: 'Erreur lors de la sauvegarde de la session.' });
+      }
+      res.json({ ok: true, redirect: redirectUrl });
+    });
   } catch (err) {
     console.error('Erreur /auth/local:', err);
     res.status(500).json({ error: 'Erreur lors de la connexion locale.' });
@@ -287,6 +320,8 @@ app.get('/api/auth/me', (req, res) => {
       name: user.name,
       email: user.email,
       username: user.username,
+      role: user.role || 'user',
+      authProvider: user.authProvider,
     },
   });
 });
@@ -307,49 +342,17 @@ app.post('/auth/logout', (req, res) => {
 // Routes API (protegees par authentification Entra ID)
 // ============================================================================
 
-// Indique si un utilisateur est connecte (et si le token MCP est configure)
+// Indique si un utilisateur est connecte
 app.get('/api/config', (req, res) => {
   const entraConfigured = Boolean(ENTRA_CLIENT_ID && ENTRA_TENANT_ID && ENTRA_CLIENT_SECRET);
   res.json({
     authenticated: Boolean(req.session.user),
-    tokenConfigured: Boolean(MCP_TOKEN_ENV),
     methods: {
       entra: entraConfigured,
       local: LOCAL_AUTH_ENABLED,
     },
     user: currentUser(req) ? { name: currentUser(req).name, email: currentUser(req).email, authProvider: currentUser(req).authProvider } : null,
   });
-});
-
-// Liste des outils exposes par le MCP 3CX (protege)
-app.get('/api/tools', requireAuth, async (req, res) => {
-  try {
-    const client = await getMcpClient(resolveToken(req));
-    const result = await client.listTools();
-    await client.close();
-    res.json(result.tools);
-  } catch (err) {
-    console.error('Erreur listTools:', err);
-    res.status(502).json({ error: 'Impossible de contacter le MCP 3CX', detail: String(err.message || err) });
-  }
-});
-
-// Appel d'un outil du MCP 3CX (protege)
-app.post('/api/call/:toolName', requireAuth, async (req, res) => {
-  const { toolName } = req.params;
-  const { arguments: args = {} } = req.body || {};
-  try {
-    const client = await getMcpClient(resolveToken(req));
-    const result = await client.callTool({ name: toolName, arguments: args });
-    await client.close();
-    res.json(result);
-  } catch (err) {
-    console.error('Erreur callTool ' + toolName + ':', err);
-    res.status(502).json({
-      error: 'Erreur lors de l appel de l outil "' + toolName + '"',
-      detail: String(err.message || err),
-    });
-  }
 });
 
 // Exécution directe d'un rapport CDR sur PostgreSQL (protégé)
@@ -397,7 +400,110 @@ app.get('/api/cdr/health', requireAuth, async (req, res) => {
 
 // Sante
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', mcpUrl: MCP_URL, authenticated: Boolean(req.session.user) });
+  res.json({ status: 'ok', authenticated: Boolean(req.session.user) });
+});
+
+// ============================================================================
+// Routes d'administration des utilisateurs (admin uniquement)
+// ============================================================================
+
+// Liste des utilisateurs
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const result = await pgPool.query('SELECT id, username, role, created_at FROM cdr_users ORDER BY username');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Erreur liste utilisateurs:', err);
+    res.status(500).json({ error: 'Erreur lors de la recuperation des utilisateurs' });
+  }
+});
+
+// Creer un utilisateur
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { username, password, role } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
+    }
+    const existing = await findUserByUsername(username);
+    if (existing) {
+      return res.status(409).json({ error: 'Cet utilisateur existe deja.' });
+    }
+
+    // Si c'est le premier utilisateur, on le fait admin automatiquement
+    const countResult = await pgPool.query('SELECT COUNT(*) AS cnt FROM cdr_users');
+    const isFirstUser = parseInt(countResult.rows[0].cnt, 10) === 0;
+    const userRole = isFirstUser ? 'admin' : (role || 'user');
+
+    const salt = generateSalt();
+    const passwordHash = salt + ':' + hashPassword(password, salt);
+
+    const result = await pgPool.query(
+      'INSERT INTO cdr_users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role',
+      [username, passwordHash, userRole]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Erreur creation utilisateur:', err);
+    res.status(500).json({ error: 'Erreur lors de la creation de l utilisateur' });
+  }
+});
+
+// Modifier un utilisateur (mot de passe et/ou role)
+app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password, role } = req.body || {};
+
+    const user = await pgPool.query('SELECT id FROM cdr_users WHERE id = $1', [id]);
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+
+    const updates = [];
+    const values = [];
+    let paramIdx = 1;
+
+    if (password) {
+      const salt = generateSalt();
+      updates.push('password_hash = $' + paramIdx++);
+      values.push(salt + ':' + hashPassword(password, salt));
+    }
+    if (role !== undefined) {
+      updates.push('role = $' + paramIdx++);
+      values.push(role);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'Aucune modification fournie.' });
+    }
+
+    values.push(id);
+    await pgPool.query('UPDATE cdr_users SET ' + updates.join(', ') + ' WHERE id = $' + paramIdx, values);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Erreur modification utilisateur:', err);
+    res.status(500).json({ error: 'Erreur lors de la modification de l utilisateur' });
+  }
+});
+
+// Supprimer un utilisateur
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Empêcher l'auto-suppression
+    if (req.session.user && req.session.user.id && ('local:' + id) === req.session.user.id) {
+      return res.status(400).json({ error: 'Impossible de supprimer votre propre compte.' });
+    }
+    const result = await pgPool.query('DELETE FROM cdr_users WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Erreur suppression utilisateur:', err);
+    res.status(500).json({ error: 'Erreur lors de la suppression de l utilisateur' });
+  }
 });
 
 const server = createServer(app);
@@ -405,5 +511,5 @@ server.listen(PORT, () => {
   console.log('Serveur rapports CDR 3CX demarre sur http://localhost:' + PORT);
   console.log('Entra ID configure : ' + Boolean(ENTRA_CLIENT_ID && ENTRA_TENANT_ID && ENTRA_CLIENT_SECRET));
   console.log('Redirect URI Entra ID : ' + ENTRA_REDIRECT_URI);
-  console.log('Token Bearer MCP 3CX configure : ' + Boolean(MCP_TOKEN_ENV));
+  console.log('Authentification locale : ' + LOCAL_AUTH_ENABLED);
 });

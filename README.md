@@ -24,7 +24,8 @@ L'application est un serveur Express qui fait le pont entre votre navigateur et 
 - Les résultats s'affichent sous forme de tableau et peuvent être exportés en **CSV ou Excel (.xlsx)**.
 - Les résultats peuvent être visualisés sous forme de **graphiques** (barres, ligne, camembert) via Chart.js.
 - Un onglet **« Rapport personnalisé »** permet de choisir les colonnes, un groupement (jour, extension, direction, motif, numéro externe...), une agrégation (nombre d'appels, durée totale, durée moyenne) et d'enregistrer la configuration pour la réutiliser plus tard (stockage local du navigateur).
-- L'accès aux outils MCP bruts reste disponible sur la page d'accueil (`/index.html`) avec le jeton Bearer MCP historique.
+- **Gestion des utilisateurs** : plusieurs comptes peuvent être créés en base PostgreSQL avec un rôle (utilisateur ou administrateur). Le premier compte créé devient automatiquement administrateur. Une page d'administration (`/admin.html`) permet de créer, modifier et supprimer des comptes.
+- L'accès aux outils MCP bruts a été retiré : le serveur ne fait plus que l'authentification et les rapports CDR directs sur PostgreSQL.
 
 ## Authentification Entra ID
 
@@ -226,14 +227,45 @@ Les dates sont en heure locale du serveur 3CX. Si vous ne saisissez pas de dates
 
 > ⚠️ Les rapports enregistrés sont stockés **uniquement dans votre navigateur** (localStorage). Ils ne sont pas partagés entre utilisateurs ni entre navigateurs.
 
+## Gestion des utilisateurs
+
+L'authentification locale utilise une table `cdr_users` dans votre base PostgreSQL 3CX. Cette table est créée automatiquement au premier démarrage du serveur.
+
+### Rôles
+
+| Rôle | Droits |
+|------|--------|
+| `user` | Accès aux rapports CDR (`/cdr.html`) |
+| `admin` | Accès aux rapports CDR + page d'administration (`/admin.html`) pour gérer les utilisateurs |
+
+Le **premier compte créé devient automatiquement administrateur**. Les comptes suivants sont des utilisateurs standards, sauf si un administrateur les promeut via `/admin.html`.
+
+### Activer l'authentification locale
+
+Dans `.env` :
+
+```
+LOCAL_AUTH_ENABLED=true
+```
+
+Puis créez vos premiers comptes depuis `http://localhost:3000/admin.html` (une fois connecté avec le premier compte admin).
+
+### Variables d'environnement pour l'authentification
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_AUTH_ENABLED` | Mettre `true` pour activer la connexion locale |
+| `SESSION_SECRET` | Clé secrète pour signer les sessions de connexion (impératif en production) |
+
 ## Fichiers
 
 | Fichier | Rôle |
 |---|---|
-| `server.js` | Serveur Express + authentification Entra ID (msal-node, express-session) + proxy MCP 3CX |
-| `public/index.html` | Interface outils MCP (accès historique avec jeton Bearer) |
-| `public/login.html` | Page de connexion Entra ID |
+| `server.js` | Serveur Express + authentification Entra ID (msal-node, express-session) + rapports CDR directs sur PostgreSQL |
+| `public/index.html` | Page d'accueil avec liens vers les outils |
+| `public/login.html` | Page de connexion (Entra ID et/ou compte local) |
 | `public/cdr.html` | Interface Rapports CDR (protégée par authentification) |
+| `public/admin.html` | Administration des utilisateurs (réservée aux administrateurs) |
 | `package.json` / `package-lock.json` | Dépendances et scripts |
 | `Dockerfile` | Image Docker du serveur |
 | `docker-compose.yml` | Orchestration Docker |
@@ -242,7 +274,8 @@ Les dates sont en heure locale du serveur 3CX. Si vous ne saisissez pas de dates
 
 ## Sécurité
 
-- Le jeton Bearer MCP 3CX transite uniquement entre votre navigateur, ce proxy local et le serveur MCP 3CX.
-- Les sessions Entra ID sont stockées dans des cookies `HttpOnly` (et `Secure` en production).
+- Les sessions d'authentification sont stockées dans des cookies `HttpOnly` (et `Secure` en production).
+- Les mots de passe des utilisateurs locaux sont hashés (PBKDF2, 100 000 itérations) avec un sel unique par utilisateur dans la table `cdr_users`.
 - Ce proxy est destiné à un usage interne. Ne l'exposez pas directement sur Internet sans ajout d'une authentification et de TLS appropriés (reverse proxy, WAF, etc.).
 - La variable `SESSION_SECRET` doit être modifiée par une valeur secrète aléatoire en production.
+- Le fichier `.env` contient des mots de passe : il est ignoré par git (`.gitignore`) et ne doit **jamais** être commité.

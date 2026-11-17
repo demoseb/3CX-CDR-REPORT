@@ -87,8 +87,9 @@
   <strong>3CX — Rapports CDR</strong>
   <span class="chip">Call Detail Records</span>
   <div class="user-bar">
-    <span class="user-info" id="userInfo">Non connecte</span>
+    <span class="user-info" id="userInfo">Chargement…</span>
     <a href="index.html" class="chip" style="text-decoration:none; color:#9ca3af;">&#8592; Outils MCP</a>
+    <a href="admin.html" class="chip admin" id="adminLink" style="text-decoration:none; display:none;">Admin</a>
     <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
   </div>
 </header>
@@ -875,8 +876,11 @@ async function checkSession() {
     const data = await res.json();
     if (data.authenticated) {
       const u = data.user;
-      document.getElementById('userInfo').textContent = (u.name || u.email || 'Utilisateur') + ' (' + u.email + ')';
+      document.getElementById('userInfo').textContent = (u.name || u.email || 'Utilisateur') + ' (' + u.role || 'user' + ')';
       document.getElementById('userInfo').className = 'user-info';
+      if (u.role === 'admin') {
+        document.getElementById('adminLink').style.display = 'inline-block';
+      }
       initColumns();
       generateSqlDetail();
       generateSqlCustom();

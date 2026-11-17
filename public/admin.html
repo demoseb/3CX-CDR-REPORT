@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Administration des utilisateurs - Rapports CDR 3CX</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; }
+    header { background: #111827; color: #fff; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    header h1 { font-size: 1.125rem; font-weight: 600; }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #9ca3af; }
+    .chip.admin { background: #dc2626; color: #fee2e2; }
+    .chip.user { background: #166534; color: #dcfce7; }
+    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+    .user-info { color: #d1d5db; }
+    .user-info strong { color: #fff; }
+    button.btn { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    button.btn:hover { background: #1d4ed8; }
+    button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary { background: #e5e7eb; color: #111827; }
+    button.secondary:hover { background: #d1d5db; }
+    button.danger { background: #dc2626; color: #fff; }
+    button.danger:hover { background: #b91c1c; }
+    button.outline { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+    button.outline:hover { background: #eff6ff; }
+    button.small { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h3 { font-size: 1rem; margin-bottom: 0.5rem; color: #111827; display: flex; align-items: center; gap: 0.5rem; }
+    .card h3 .icon { font-size: 1.1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field label { font-size: 0.75rem; font-weight: 600; color: #374151; }
+    .field input, .field select {
+      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.45rem; font-size: 0.9rem; background: #fff;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: #2563eb; }
+    .field small { color: #6b7280; font-size: 0.7rem; }
+    .table-wrap { overflow-x: auto; }
+    table.data { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.85rem; }
+    table.data th, table.data td { border: 1px solid #e5e7eb; padding: 0.5rem 0.75rem; text-align: left; vertical-align: middle; }
+    table.data th { background: #f3f4f6; font-weight: 600; color: #374151; white-space: nowrap; }
+    table.data tr:nth-child(even) { background: #f9fafb; }
+    table.data tr:hover { background: #f1f5f9; }
+    .actions { display: flex; gap: 0.3rem; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+    .modal-content { background: #fff; border-radius: 0.75rem; padding: 1.5rem; width: 100%; max-width: 450px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+    .modal.open { display: flex; }
+    .modal h3 { margin-top: 0; margin-bottom: 1rem; }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+    .status { padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .status.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .empty { text-align: center; color: #6b7280; padding: 2rem; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .role-badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: 600; }
+    .role-badge.admin { background: #fecaca; color: #991b1b; }
+    .role-badge.user { background: #dcfce7; color: #166534; }
+    .self-note { font-size: 0.75rem; color: #6b7280; font-style: italic; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>3CX — Administration utilisateurs</strong>
+  <span class="chip admin">Admin</span>
+  <div class="user-bar">
+    <span class="user-info" id="userInfo">Chargement…</span>
+    <a href="cdr.html" class="chip" style="text-decoration:none; color:#9ca3af;">&#8592; Rapports CDR</a>
+    <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
+  </div>
+</header>
+<div class="container">
+  <div class="toolbar">
+    <button class="btn secondary" id="btn-back" onclick="location.href='cdr.html'">&#8592; Retour rapports</button>
+    <button class="btn" id="btn-add-user">+ Ajouter un utilisateur</button>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div class="card">
+    <h3><span class="icon">&#128100;</span> Utilisateurs</h3>
+    <div id="usersTableWrap" class="table-wrap">
+      <div class="empty">Chargement des utilisateurs…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal ajout / modification -->
+<div class="modal" id="userModal">
+  <div class="modal-content">
+    <h3 id="modalTitle">Ajouter un utilisateur</h3>
+    <div id="modalStatus" class="status"></div>
+    <form id="userForm">
+      <input type="hidden" id="editUserId" />
+      <div class="field">
+        <label>Identifiant</label>
+        <input type="text" id="inputUsername" placeholder="ex: jdupont" required />
+        <small class="self-note">L'identifiant ne peut pas etre modifie apres creation.</small>
+      </div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <input type="password" id="inputPassword" placeholder="Au moins 6 caracteres" required />
+        <small>Laissez vide pour conserver le mot de passe actuel (modification).</small>
+      </div>
+      <div class="field">
+        <label>Role</label>
+        <select id="inputRole">
+          <option value="user">Utilisateur</option>
+          <option value="admin">Administrateur</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn secondary small" type="button" id="btnCancel">Annuler</button>
+        <button class="btn" type="submit" id="btnSaveUser">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API_BASE = '';
+let currentUser = null;
+let editingUserId = null;
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function setStatus(text, kind) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.className = 'status ' + (kind || 'ok');
+  el.style.display = text ? 'block' : 'none';
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Erreur inconnue (' + res.status + ')');
+  return data;
+}
+
+async function loadCurrentUser() {
+  try {
+    const me = await api('/api/auth/me');
+    currentUser = me.user;
+    document.getElementById('userInfo').textContent = currentUser.name + ' (' + currentUser.role + ')';
+    if (currentUser.role !== 'admin') {
+      document.body.innerHTML = '<div class="card" style="max-width:500px;margin:4rem auto;text-align:center;"><h3>Accès refusé</h3><p>Cette page est reservée aux administrateurs.</p><a href="cdr.html" class="btn">Retour aux rapports</a></div>';
+    }
+  } catch (e) {
+    window.location.href = '/login.html?return=/admin.html';
+  }
+}
+
+async function loadUsers() {
+  const wrap = document.getElementById('usersTableWrap');
+  try {
+    const users = await api('/api/admin/users');
+    if (users.length === 0) {
+      wrap.innerHTML = '<div class="empty">Aucun utilisateur.</div>';
+      return;
+    }
+    let html = '<table class="data"><thead><tr><th>Identifiant</th><th>Role</th><th>Cree le</th><th>Actions</th></tr></thead><tbody>';
+    for (const u of users) {
+      const isSelf = currentUser && ('local:' + u.id) === currentUser.id;
+      html += '<tr>';
+      html += '<td>' + escapeHtml(u.username) + '</td>';
+      html += '<td><span class="role-badge ' + u.role + '">' + u.role + '</span>' + (isSelf ? ' (vous)' : '') + '</td>';
+      html += '<td>' + escapeHtml(u.created_at ? new Date(u.created_at).toLocaleString() : '-') + '</td>';
+      html += '<td><div class="actions">';
+      if (!isSelf) {
+        html += '<button class="btn outline small" onclick="openEditModal(' + u.id + ', \'' + escapeHtml(u.username) + '\', \'' + u.role + '\')">Modifier</button>';
+        html += '<button class="btn danger small" onclick="deleteUser(' + u.id + ', \'' + escapeHtml(u.username) + '\')">Supprimer</button>';
+      } else {
+        html += '<span style="font-size:0.7rem;color:#6b7280;">vous</span>';
+      }
+      html += '</div></td></tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch (err) {
+    setStatus(err.message, 'err');
+    wrap.innerHTML = '<div class="empty">Erreur de chargement.</div>';
+  }
+}
+
+function openAddModal() {
+  editingUserId = null;
+  document.getElementById('modalTitle').textContent = 'Ajouter un utilisateur';
+  document.getElementById('userForm').reset();
+  document.getElementById('inputPassword').required = true;
+  document.getElementById('inputUsername').disabled = false;
+  document.getElementById('modalStatus').style.display = 'none';
+  document.getElementById('userModal').classList.add('open');
+}
+
+function openEditModal(id, username, role) {
+  editingUserId = id;
+  document.getElementById('modalTitle').textContent = 'Modifier ' + escapeHtml(username);
+  document.getElementById('editUserId').value = id;
+  document.getElementById('inputUsername').value = username;
+  document.getElementById('inputUsername').disabled = true;
+  document.getElementById('inputPassword').value = '';
+  document.getElementById('inputPassword').required = false;
+  document.getElementById('inputRole').value = role;
+  document.getElementById('modalStatus').style.display = 'none';
+  document.getElementById('userModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('userModal').classList.remove('open');
+  editingUserId = null;
+}
+
+async function saveUser(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnSaveUser');
+  btn.disabled = true;
+  btn.textContent = 'Enregistrement…';
+  try {
+    const username = document.getElementById('inputUsername').value.trim();
+    const password = document.getElementById('inputPassword').value;
+    const role = document.getElementById('inputRole').value;
+
+    if (editingUserId) {
+      const body = {};
+      if (password) body.password = password;
+      if (role) body.role = role;
+      await api('/api/admin/users/' + editingUserId, { method: 'PUT', body: JSON.stringify(body) });
+    } else {
+      if (!password) throw new Error('Le mot de passe est requis.');
+      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+    }
+    closeModal();
+    await loadUsers();
+    setStatus('Utilisateur enregistre.', 'ok');
+  } catch (err) {
+    setStatus(err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Enregistrer';
+  }
+}
+
+async function deleteUser(id, username) {
+  if (!confirm('Supprimer l utilisateur "' + username + '" ?')) return;
+  try {
+    await api('/api/admin/users/' + id, { method: 'DELETE' });
+    await loadUsers();
+    setStatus('Utilisateur supprime.', 'ok');
+  } catch (err) {
+    setStatus(err.message, 'err');
+  }
+}
+
+document.getElementById('btn-add-user').addEventListener('click', openAddModal);
+document.getElementById('btnCancel').addEventListener('click', closeModal);
+document.getElementById('userForm').addEventListener('submit', saveUser);
+document.getElementById('userModal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('userModal')) closeModal();
+});
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
+  window.location.href = '/login.html';
+});
+
+loadCurrentUser();
+loadUsers();
+</script>
+</body>
+</html>
