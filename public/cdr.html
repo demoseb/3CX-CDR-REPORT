@@ -197,6 +197,39 @@
       </div>
     </div>
 
+    <!-- Requete rapide sur le dashboard -->
+    <div class="card">
+      <h3><span class="icon">&#128203;</span> Filtres de recherche rapides</h3>
+      <div class="grid">
+        <div class="field">
+          <label>Date debut</label>
+          <input type="datetime-local" id="dash-dateFrom" />
+        </div>
+        <div class="field">
+          <label>Date fin</label>
+          <input type="datetime-local" id="dash-dateTo" />
+        </div>
+        <div class="field">
+          <label>Extension / DN</label>
+          <input type="text" id="dash-extension" placeholder="ex: 1001" />
+        </div>
+        <div class="field">
+          <label>Direction</label>
+          <select id="dash-direction">
+            <option value="">Toutes</option>
+            <option value="incoming">Entrant</option>
+            <option value="outgoing">Sortant</option>
+            <option value="internal">Interne</option>
+          </select>
+        </div>
+        <div class="field" style="align-self: end;">
+          <button class="btn success" id="btn-apply-dash">Appliquer</button>
+          <button class="btn secondary" id="btn-reset-dash">Reinitialiser</button>
+        </div>
+      </div>
+      <div class="presets" id="presets-dashboard"></div>
+    </div>
+
     <!-- Graphiques overview -->
     <div class="card">
       <h3><span class="icon">&#128207;</span> Apercu des appels</h3>
@@ -557,15 +590,20 @@ function switchView(view) {
 /* ============================================================================
    Dashboard - KPI et graphiques apercu
    ============================================================================ */
-async function loadDashboard() {
-  // Dates par defaut : 7 derniers jours
+async function loadDashboard(filters) {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
-  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateFrom = (filters && filters.dateFrom) || sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = (filters && filters.dateTo) || now.toISOString().replace('T', ' ').replace('.000Z', '');
+
+  const qs = new URLSearchParams();
+  qs.set('dateFrom', dateFrom);
+  qs.set('dateTo', dateTo);
+  if (filters && filters.extension) qs.set('extension', filters.extension);
+  if (filters && filters.direction) qs.set('direction', filters.direction);
 
   try {
-    const res = await fetch('/api/cdr/stats?dateFrom=' + encodeURIComponent(dateFrom) + '&dateTo=' + encodeURIComponent(dateTo));
+    const res = await fetch('/api/cdr/stats?' + qs.toString());
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
 
@@ -581,8 +619,8 @@ async function loadDashboard() {
       document.getElementById('kpi-last-call-detail').textContent = 'Aucun appel';
     }
 
-    // Graphique : appels par jour (7 derniers jours)
-    renderCallsByDay(data);
+    // Graphique : appels par jour (vraies donnees groupées par jour)
+    await fetchCallsByDay(dateFrom, dateTo, filters && filters.extension, filters && filters.direction);
 
     // Graphique : repartition par direction
     renderByDirection(data.byDirection);
@@ -590,36 +628,73 @@ async function loadDashboard() {
     // Graphique : repartition par motif de fin
     renderByTermination(data.byTermination);
 
-    // Appels recents (charge via detail avec limite 10)
-    loadRecentCalls();
+    // Appels recents (charge avec les mêmes filtres)
+    loadRecentCalls(filters);
   } catch (err) {
     console.error('Erreur chargement dashboard:', err);
     setStatus('status-detail', 'Erreur chargement dashboard : ' + err.message, 'err');
   }
 }
 
-function renderCallsByDay(stats) {
+function renderCallsByDay(days) {
   const ctx = document.getElementById('chart-calls-by-day').getContext('2d');
   if (charts['calls-by-day']) charts['calls-by-day'].destroy();
-  // On n'a pas de donnees par jour depuis l'endpoint stats, on affiche un message
-  // Les vraies donnees par jour viennent du rapport personnalise (groupement par jour)
+  const labels = days ? days.map(d => d.label) : [];
+  const values = days ? days.map(d => d.value) : [];
   new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: [],
+      labels: labels,
       datasets: [{
         label: 'Appels par jour',
-        data: [],
+        data: values,
         backgroundColor: '#2563eb',
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { title: { display: true, text: 'Appels par jour (a generer dans Rapport personnalise)' } },
+      plugins: { title: { display: true, text: 'Appels par jour' } },
       scales: { y: { beginAtZero: true } }
     }
   });
+}
+
+/* Recupere les appels groupés par jour depuis PostgreSQL (pour le graphique par jour du dashboard) */
+async function fetchCallsByDay(dateFrom, dateTo, extension, direction) {
+  let whereClauses = [];
+  let params = [];
+  let paramIdx = 1;
+  if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
+  if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+  if (extension) {
+    whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + extension + '%');
+    params.push('%' + extension + '%');
+  }
+  if (direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+  else if (direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+  else if (direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
+  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+  const sql = '-- Appels par jour (dashboard)\nSELECT\n  DATE(c.cdr_started_at) AS jour,\n  COUNT(*) AS nb_appels\nFROM public.cdroutput c\n' + (whereSql ? whereSql + '\n' : '') + 'GROUP BY DATE(c.cdr_started_at)\nORDER BY DATE(c.cdr_started_at) ASC;';
+
+  try {
+    const res = await fetch('/api/cdr/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    const days = (data.rows || []).map(r => ({
+      label: formatDateShort(r.jour),
+      value: parseInt(r.nb_appels, 10),
+    }));
+    renderCallsByDay(days);
+  } catch (err) {
+    console.error('Erreur chargement appels par jour:', err);
+    renderCallsByDay([]);
+  }
 }
 
 function renderByDirection(data) {
@@ -672,14 +747,26 @@ function renderByTermination(data) {
   });
 }
 
-async function loadRecentCalls() {
+async function loadRecentCalls(filters) {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
-  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateFrom = (filters && filters.dateFrom) || sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = (filters && filters.dateTo) || now.toISOString().replace('T', ' ').replace('.000Z', '');
 
-  const sql = '-- Appels recents\nSELECT\n  c.cdr_started_at AS debut_appel,\n  c.cdr_ended_at AS fin_appel,\n  c.source_dn_number AS poste_appelant,\n  c.destination_dn_number AS poste_appele,\n  CASE WHEN c.source_participant_is_incoming THEN \'Entrant\' WHEN c.destination_participant_is_incoming THEN \'Sortant\' ELSE \'Interne\' END AS direction,\n  c.termination_reason AS motif_fin,\n  EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60 AS duree_minutes\nFROM public.cdroutput c\nLEFT JOIN public.cdrbilling b ON b.cdr_id = c.cdr_id\nWHERE c.cdr_started_at >= $1 AND c.cdr_started_at <= $2\nORDER BY c.cdr_started_at DESC\nLIMIT 10;';
-  const params = [dateFrom, dateTo];
+  let whereClauses = ['c.cdr_started_at >= $1', 'c.cdr_started_at <= $2'];
+  let params = [dateFrom, dateTo];
+  let paramIdx = 3;
+
+  if (filters && filters.extension) {
+    whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + filters.extension + '%');
+    params.push('%' + filters.extension + '%');
+  }
+  if (filters && filters.direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+  else if (filters && filters.direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+  else if (filters && filters.direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
+
+  const sql = '-- Appels recents\nSELECT\n  c.cdr_started_at AS debut_appel,\n  c.cdr_ended_at AS fin_appel,\n  c.source_dn_number AS poste_appelant,\n  c.destination_dn_number AS poste_appele,\n  CASE WHEN c.source_participant_is_incoming THEN \'Entrant\' WHEN c.destination_participant_is_incoming THEN \'Sortant\' ELSE \'Interne\' END AS direction,\n  c.termination_reason AS motif_fin,\n  EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60 AS duree_minutes\nFROM public.cdroutput c\nLEFT JOIN public.cdrbilling b ON b.cdr_id = c.cdr_id\nWHERE ' + whereClauses.join(' AND ') + '\nORDER BY c.cdr_started_at DESC\nLIMIT 10;';
 
   try {
     const res = await fetch('/api/cdr/query', {
@@ -693,6 +780,17 @@ async function loadRecentCalls() {
     console.error('Erreur appels recents:', err);
     document.getElementById('recent-calls-table').innerHTML = '<div class="empty">Impossible de charger les appels recents.</div>';
   }
+}
+
+/* Requete rapide depuis le dashboard : recharge KPI + graphiques selon les filtres saisis */
+async function applyDashboardFilters() {
+  const filters = {
+    dateFrom: document.getElementById('dash-dateFrom').value || null,
+    dateTo: document.getElementById('dash-dateTo').value || null,
+    extension: document.getElementById('dash-extension').value.trim() || null,
+    direction: document.getElementById('dash-direction').value || null,
+  };
+  await loadDashboard(filters);
 }
 
 function renderRecentCallsTable(rows) {
@@ -1263,6 +1361,15 @@ document.getElementById('btn-export-xlsx-detail').addEventListener('click', () =
 
 document.getElementById('btn-open-detail').addEventListener('click', () => switchView('detail'));
 
+document.getElementById('btn-apply-dash').addEventListener('click', applyDashboardFilters);
+document.getElementById('btn-reset-dash').addEventListener('click', () => {
+  document.getElementById('dash-dateFrom').value = '';
+  document.getElementById('dash-dateTo').value = '';
+  document.getElementById('dash-extension').value = '';
+  document.getElementById('dash-direction').value = '';
+  loadDashboard();
+});
+
 document.querySelectorAll('#tab-custom input, #tab-custom select').forEach(el => {
   el.addEventListener('change', generateSqlCustom);
   el.addEventListener('input', generateSqlCustom);
@@ -1286,6 +1393,7 @@ async function checkSession() {
       generateSqlDetail();
       generateSqlCustom();
       renderPresets('presets-detail', 'dateFrom', 'dateTo');
+      renderPresets('presets-dashboard', 'dash-dateFrom', 'dash-dateTo');
       renderSavedReports();
       loadDashboard();
       return;

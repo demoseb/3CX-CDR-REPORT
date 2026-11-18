@@ -324,12 +324,20 @@ app.post('/api/cdr/query', requireAuth, async (req, res) => {
 // Statistiques agregées pour le dashboard KPI (protege)
 app.get('/api/cdr/stats', requireAuth, async (req, res) => {
   try {
-    const { dateFrom, dateTo } = req.query;
+    const { dateFrom, dateTo, extension, direction } = req.query;
     let whereClauses = [];
     let params = [];
     let paramIdx = 1;
     if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
     if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+    if (extension) {
+      whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+      params.push('%' + extension + '%');
+      params.push('%' + extension + '%');
+    }
+    if (direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+    else if (direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+    else if (direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
     const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
 
     const totalCalls = await pgPool.query(
