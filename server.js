@@ -7,6 +7,31 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 import fs from 'fs';
 import path from 'path';
 
+// Charge le fichier .env (variables non definies dans l'environnement uniquement)
+function loadEnv() {
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envPath)) {
+      const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        let value = trimmed.slice(eq + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+        if (key && process.env[key] === undefined) {
+          process.env[key] = value;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Impossible de charger .env:', e.message);
+  }
+}
+loadEnv();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -79,7 +104,11 @@ async function initSqlDb() {
 function findUserByUsername(username) {
   if (!sqlDb) return null;
   const stmt = sqlDb.prepare('SELECT id, username, password_hash, role, created_at FROM cdr_users WHERE username = ?');
-  const row = stmt.get(username);
+  stmt.bind([username]);
+  let row = null;
+  if (stmt.step()) {
+    row = stmt.getAsObject();
+  }
   stmt.free();
   return row || null;
 }
@@ -89,6 +118,7 @@ function findUserByUsername(username) {
 function verifyLocalUser(username, password) {
   const user = findUserByUsername(username);
   if (!user) return null;
+  if (!user.password_hash) return null;
   const parts = user.password_hash.split(':');
   if (parts.length !== 2) return null;
   const hash = hashPassword(password, parts[0]);
@@ -107,7 +137,7 @@ function saveSqlDb() {
 }
 
 // Initialiser SQLite au demarrage
-initSqlDb().catch((err) => {
+await initSqlDb().catch((err) => {
   console.error('Erreur initialisation SQLite:', err.message);
 });
 
@@ -459,7 +489,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
 });
 
 // Creer un utilisateur
-app.post('/api/admin/users', requireAdmin, (req, res) => {
+app.post('/api/admin/users', async (req, res) => {
   try {
     if (!sqlInitialized) {
       return res.status(503).json({ error: 'Base de donnees utilisateurs pas encore prete.' });
@@ -469,16 +499,24 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
     }
 
+    // Si c'est le premier utilisateur, on le fait admin automatiquement
+    // et on autorise sa creation sans authentification prealable (amorçage).
+    const countStmt = sqlDb.prepare('SELECT COUNT(*) AS cnt FROM cdr_users');
+    countStmt.step();
+    const cnt = countStmt.getAsObject().cnt;
+    const isFirstUser = cnt === 0;
+    countStmt.free();
+    if (!isFirstUser) {
+      if (!req.session.user || req.session.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+      }
+    }
+
     const existing = findUserByUsername(username);
     if (existing) {
       return res.status(409).json({ error: 'Cet utilisateur existe deja.' });
     }
 
-    // Si c'est le premier utilisateur, on le fait admin automatiquement
-    const countStmt = sqlDb.prepare('SELECT COUNT(*) AS cnt FROM cdr_users');
-    countStmt.step();
-    const isFirstUser = countStmt.getAsObject().cnt === 0;
-    countStmt.free();
     const userRole = isFirstUser ? 'admin' : (role || 'user');
 
     const salt = generateSalt();
@@ -487,7 +525,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
     const insertStmt = sqlDb.prepare(
       'INSERT INTO cdr_users (username, password_hash, role) VALUES (?, ?, ?)'
     );
-    insertStmt.run(username, passwordHash, userRole);
+    insertStmt.run([username, passwordHash, userRole]);
     insertStmt.free();
 
     // Recupere l'utilisateur cree
@@ -511,8 +549,8 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
 
     const existing = findUserByUsername(''); // placeholder, on verifie par id ci-dessous
     const checkStmt = sqlDb.prepare('SELECT id FROM cdr_users WHERE id = ?');
-    checkStmt.step(id);
-    if (!checkStmt.getAsObject()) {
+    checkStmt.bind([id]);
+    if (!checkStmt.step()) {
       checkStmt.free();
       return res.status(404).json({ error: 'Utilisateur introuvable.' });
     }
@@ -537,7 +575,7 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
 
     values.push(id);
     const updateStmt = sqlDb.prepare('UPDATE cdr_users SET ' + updates.join(', ') + ' WHERE id = ?');
-    updateStmt.run(...values);
+    updateStmt.run(values);
     updateStmt.free();
 
     saveSqlDb();
@@ -560,7 +598,7 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'Impossible de supprimer votre propre compte.' });
     }
     const delStmt = sqlDb.prepare('DELETE FROM cdr_users WHERE id = ?');
-    delStmt.run(id);
+    delStmt.run([id]);
     const changes = delStmt.changes();
     delStmt.free();
 
