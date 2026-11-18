@@ -243,6 +243,9 @@
         <div class="chart-container chart-card">
           <canvas id="chart-by-termination"></canvas>
         </div>
+        <div class="chart-container chart-card">
+          <canvas id="chart-top-callers"></canvas>
+        </div>
       </div>
     </div>
 
@@ -622,6 +625,9 @@ async function loadDashboard(filters) {
     // Graphique : appels par jour (vraies donnees groupées par jour)
     await fetchCallsByDay(dateFrom, dateTo, filters && filters.extension, filters && filters.direction);
 
+    // Graphique : top numéros appelants
+    await fetchTopCallers(dateFrom, dateTo, filters && filters.extension, filters && filters.direction);
+
     // Graphique : repartition par direction
     renderByDirection(data.byDirection);
 
@@ -658,6 +664,73 @@ function renderCallsByDay(days) {
       scales: { y: { beginAtZero: true } }
     }
   });
+}
+
+function renderTopCallers(rows) {
+  const ctx = document.getElementById('chart-top-callers').getContext('2d');
+  if (charts['top-callers']) charts['top-callers'].destroy();
+  // Trie par nb_appels decroissant et prend les 10 premiers (déjà fait en SQL, mais on sécurise)
+  const data = (rows || []).slice().sort((a, b) => (b.nb_appels || 0) - (a.nb_appels || 0)).slice(0, 10);
+  // Inverse pour l'affichage horizontal : le plus grand en haut
+  data.reverse();
+  const labels = data.map(r => (r.numero_appelant || 'Inconnu').toString());
+  const values = data.map(r => parseInt(r.nb_appels, 10) || 0);
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Nombre d appels',
+        data: values,
+        backgroundColor: '#16a34a',
+        borderColor: '#16a34a',
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Top numéros appelants' } },
+      scales: {
+        x: { beginAtZero: true, title: { display: true, text: 'Appels' } },
+        y: { title: { display: true, text: 'Numéro appelant' } }
+      }
+    }
+  });
+}
+
+/* Recupere les top numéros appelants depuis PostgreSQL (pour le graphique du dashboard) */
+async function fetchTopCallers(dateFrom, dateTo, extension, direction) {
+  let whereClauses = ["c.source_participant_phone_number IS NOT NULL AND c.source_participant_phone_number <> ''"];
+  let params = [];
+  let paramIdx = 1;
+  if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
+  if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+  if (extension) {
+    whereClauses.push('(c.source_dn_number ILIKE $' + paramIdx++ + ' OR c.destination_dn_number ILIKE $' + paramIdx++ + ')');
+    params.push('%' + extension + '%');
+    params.push('%' + extension + '%');
+  }
+  if (direction === 'incoming') whereClauses.push('c.source_participant_is_incoming = TRUE');
+  else if (direction === 'outgoing') whereClauses.push('c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE');
+  else if (direction === 'internal') whereClauses.push("c.source_entity_type = 'Extension' AND c.destination_entity_type = 'Extension'");
+  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+  const sql = '-- Top numéros appelants (dashboard)\nSELECT\n  c.source_participant_phone_number AS numero_appelant,\n  COUNT(*) AS nb_appels\nFROM public.cdroutput c\n' + (whereSql ? whereSql + '\n' : '') + 'GROUP BY c.source_participant_phone_number\nORDER BY nb_appels DESC\nLIMIT 10;';
+
+  try {
+    const res = await fetch('/api/cdr/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    renderTopCallers(data.rows || []);
+  } catch (err) {
+    console.error('Erreur chargement top appelants:', err);
+    renderTopCallers([]);
+  }
 }
 
 /* Recupere les appels groupés par jour depuis PostgreSQL (pour le graphique par jour du dashboard) */
