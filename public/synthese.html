@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Synthèse — Exporteur CDR 3CX Entra ID</title>
+  <!-- Chart.js pour les graphiques (CDN, aucune dependance native) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #15803d;
+      --danger: #dc2626;
+      --warning: #ca8a04;
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --radius: 0.75rem;
+      --incoming: #2563eb;
+      --outgoing: #059669;
+      --no-answer: #ca8a04;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    a { text-decoration: none; color: inherit; }
+
+    /* Header */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.875rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; font-size: 1.125rem; font-weight: 700; color: var(--text); }
+    .brand .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 0 2px rgba(5,150,105,0.2); }
+    header h1 { font-size: 1.125rem; font-weight: 600; color: var(--text); }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #fff; }
+    .chip.ok { background: var(--success); color: #fff; }
+    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--muted); }
+    button.btn { background: var(--primary); color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    button.btn:hover { background: var(--primary-dark); }
+    button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary { background: #f3f4f6; color: var(--text); border: 1px solid var(--border); }
+    button.secondary:hover { background: #e5e7eb; }
+    button.danger { background: var(--danger); color: #fff; }
+    button.danger:hover { background: #b91c1c; }
+    button.success { background: var(--success); color: #fff; }
+    button.success:hover { background: #14532d; }
+    button.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    button.outline:hover { background: #eff6ff; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.8rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; }
+    button.ghost:hover { background: #f9fafb; }
+    button.ghost.active { background: #dbeafe; border-color: var(--primary); color: var(--primary-dark); }
+
+    /* Periode */
+    .period { font-size: 0.8rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+    /* Layout */
+    .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h2 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
+    .card h2 .icon { font-size: 1.1rem; }
+
+    /* KPI cards - 3 columns grid like Flower Data Synthese */
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .kpi .label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi .value { font-size: 2rem; font-weight: 700; color: var(--text); line-height: 1.1; }
+    .kpi .value.empty { color: var(--muted); }
+    .kpi .sub { font-size: 0.8rem; color: var(--muted); margin-top: auto; }
+    .kpi .percent { font-size: 1.25rem; font-weight: 700; margin-top: 0.2rem; }
+    .kpi .percent.ok { color: var(--success); }
+    .kpi .percent.empty { color: var(--muted); }
+    .kpi .percent.warn { color: var(--no-answer); }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .toolbar-right { margin-left: auto; display: flex; gap: 0.5rem; }
+
+    /* Charts */
+    .chart-container { position: relative; height: 300px; width: 100%; margin-top: 1rem; }
+    .chart-wrap { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+    @media (min-width: 768px) { .chart-wrap { grid-template-columns: 1fr 1fr; } }
+    .chart-card { height: 320px; }
+
+    /* Status */
+    .status { padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .status.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+
+    /* Table */
+    table.data { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
+    table.data th, table.data td { border: 1px solid var(--border); padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+    table.data th { background: #f3f4f6; font-weight: 600; color: var(--muted); white-space: nowrap; font-size: 0.75rem; }
+    table.data tr:nth-child(even) { background: #f9fafb; }
+    table.data tr:hover { background: #f3f4f6; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container { padding: 1rem; }
+      header { padding: 0.75rem 1rem; flex-direction: column; align-items: stretch; }
+      .period { margin-left: 0; margin-top: 0.5rem; text-align: center; }
+      .kpi-grid { grid-template-columns: 1fr; }
+      .chart-wrap { grid-template-columns: 1fr; }
+      .toolbar { flex-direction: column; align-items: stretch; }
+      .toolbar-right { margin-left: 0; margin-top: 0.75rem; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand"><div class="dot"></div><span>Exporteur CDR 3CX Entra ID</span></div>
+  <h1>Synthèse</h1>
+  <div class="period" id="periodDisplay">01/11/2026 — 18/11/2026</div>
+  <div class="user-bar">
+    <span class="chip ok">Connecte</span>
+    <a href="cdr.html" class="chip" style="text-decoration:none;">&#8592; Rapports CDR</a>
+    <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="toolbar">
+    <div>
+      <button class="btn ghost" id="btn-fullscreen">Plein écran &#x1F5D6;</button>
+      <button class="btn ghost" id="btn-reset">Réinitialisation &#x1F504;</button>
+      <button class="btn ghost" id="btn-print">Imprimer &#x1F4F0;</button>
+      <button class="btn outline" id="btn-export">Export &#x1F4BE;</button>
+    </div>
+    <div class="toolbar-right">
+      <span class="chip">Flower Data compatible</span>
+    </div>
+  </div>
+
+  <!-- KPI cards 3x3 like Flower Data Synthese -->
+  <div class="kpi-grid">
+    <!-- Ligne 1 : Appels entrants -->
+    <div class="kpi">
+      <div class="label">Total entrants</div>
+      <div class="value" id="kpi-total-incoming">1</div>
+      <div class="sub">Appels entrants sur la periode</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Répondus</div>
+      <div class="percent ok" id="kpi-incoming-answered-pct">12,50 %</div>
+      <div class="sub">Taux de réponse entrants</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Non répondus</div>
+      <div class="percent empty" id="kpi-incoming-no-answer-pct">(Vide)</div>
+      <div class="sub">Appels entrants sans réponse</div>
+    </div>
+
+    <!-- Ligne 2 : Appels sortants -->
+    <div class="kpi">
+      <div class="label">Total sortants</div>
+      <div class="value" id="kpi-total-outgoing">7</div>
+      <div class="sub">Appels sortants sur la periode</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Répondus</div>
+      <div class="percent ok" id="kpi-outgoing-answered-pct">87,50 %</div>
+      <div class="sub">1 appel sur 7</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Non répondus</div>
+      <div class="percent warn" id="kpi-outgoing-no-answer-pct">85,71 %</div>
+      <div class="sub">6 appels sans réponse</div>
+    </div>
+
+    <!-- Ligne 3 : Totaux -->
+    <div class="kpi">
+      <div class="label">Total</div>
+      <div class="value" id="kpi-total-all">8</div>
+      <div class="sub">Appels entrants + sortants</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total répondus</div>
+      <div class="percent ok" id="kpi-total-answered">2</div>
+      <div class="sub">Appels avec réponse</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Total non répondus</div>
+      <div class="percent warn" id="kpi-total-no-answer">6</div>
+      <div class="sub">Appels sans réponse</div>
+    </div>
+  </div>
+
+  <!-- Graphiques -->
+  <div class="card">
+    <h2><span class="icon">&#128207;</span> Appels reçus et non répondus</h2>
+    <div class="chart-wrap">
+      <div class="chart-container chart-card">
+        <canvas id="chart-incoming"></canvas>
+      </div>
+      <div class="chart-container chart-card">
+        <canvas id="chart-outgoing"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tableau de détail -->
+  <div class="card">
+    <div class="recent-header">
+      <h2><span class="icon">&#128202;</span> Détail des appels</h2>
+    </div>
+    <div id="status-table" class="status"></div>
+    <div id="calls-table"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   Données de référence (Synthèse Flower Data, période 01/11/2026 – 18/11/2026)
+   Ces valeurs sont statiques pour la démo. Elles peuvent être remplacées
+   par un appel à /api/cdr/stats quand le backend est connecté.
+   ============================================================================ */
+const SYNTHESE_DATA = {
+  period: '01/11/2026 — 18/11/2026',
+  incoming: {
+    total: 1,
+    answeredPct: '12,50',
+    noAnswerPct: '(Vide)',
+    answeredCount: null,
+    noAnswerCount: null,
+  },
+  outgoing: {
+    total: 7,
+    answeredPct: '87,50',
+    noAnswerPct: '85,71',
+    answeredCount: 1,
+    noAnswerCount: 6,
+  },
+  totals: {
+    all: 8,
+    answered: 2,
+    noAnswer: 6,
+  },
+  // Données pour les graphiques (jour par jour sur la période)
+  incomingByDay: [
+    { label: '01/11', value: 0 }, { label: '02/11', value: 0 }, { label: '03/11', value: 0 },
+    { label: '04/11', value: 0 }, { label: '05/11', value: 0 }, { label: '06/11', value: 0 },
+    { label: '07/11', value: 0 }, { label: '08/11', value: 0 }, { label: '09/11', value: 0 },
+    { label: '10/11', value: 0 }, { label: '11/11', value: 1 }, { label: '12/11', value: 0 },
+    { label: '13/11', value: 0 }, { label: '14/11', value: 0 }, { label: '15/11', value: 0 },
+    { label: '16/11', value: 0 }, { label: '17/11', value: 0 }, { label: '18/11', value: 0 },
+  ],
+  outgoingByDay: [
+    { label: '01/11', value: 0 }, { label: '02/11', value: 0 }, { label: '03/11', value: 0 },
+    { label: '04/11', value: 0 }, { label: '05/11', value: 0 }, { label: '06/11', value: 0 },
+    { label: '07/11', value: 0 }, { label: '08/11', value: 0 }, { label: '09/11', value: 1 },
+    { label: '10/11', value: 0 }, { label: '11/11', value: 0 }, { label: '12/11', value: 1 },
+    { label: '13/11', value: 1 }, { label: '14/11', value: 1 }, { label: '15/11', value: 1 },
+    { label: '16/11', value: 0 }, { label: '17/11', value: 1 }, { label: '18/11', value: 1 },
+  ],
+  // Détail des appels (simulé pour la démo)
+  calls: [
+    { debut: '11/11/2026 09:15', posteAppelant: '1001', nomAppelant: 'Alice Dupont', numeroAppelant: '0123456789', posteAppele: '1002', nomAppele: 'Bob Martin', numeroAppele: '', direction: 'Entrant', motif: 'Répondu', duree: '1m 30s' },
+    { debut: '09/11/2026 14:20', posteAppelant: '1005', nomAppelant: 'Charlie Bernard', numeroAppelant: '0612345678', posteAppele: '', nomAppele: 'Service client', numeroAppele: '0987654321', direction: 'Sortant', motif: 'Répondu', duree: '4m 12s' },
+    { debut: '12/11/2026 10:05', posteAppelant: '1003', nomAppelant: 'Diana Petit', numeroAppelant: '', posteAppele: '1001', nomAppele: 'Alice Dupont', numeroAppele: '', direction: 'Entrant', motif: 'Sans réponse', duree: '0s' },
+    { debut: '13/11/2026 16:40', posteAppelant: '1007', nomAppelant: 'Eve Moreau', numeroAppelant: '0698765432', posteAppele: '', nomAppele: 'Fournisseur XYZ', numeroAppele: '0144556677', direction: 'Sortant', motif: 'Sans réponse', duree: '0s' },
+    { debut: '14/11/2026 11:30', posteAppelant: '1002', nomAppelant: 'Bob Martin', numeroAppelant: '', posteAppele: '1005', nomAppele: 'Charlie Bernard', numeroAppele: '', direction: 'Entrant', motif: 'Sans réponse', duree: '0s' },
+    { debut: '15/11/2026 08:50', posteAppelant: '1004', nomAppelant: 'Frank Leroy', numeroAppelant: '0711223344', posteAppele: '', nomAppele: 'Cabinet ABC', numeroAppele: '0233445566', direction: 'Sortant', motif: 'Sans réponse', duree: '0s' },
+    { debut: '17/11/2026 13:10', posteAppelant: '1006', nomAppelant: 'Grace Simon', numeroAppelant: '', posteAppele: '1007', nomAppele: 'Eve Moreau', numeroAppele: '', direction: 'Entrant', motif: 'Sans réponse', duree: '0s' },
+    { debut: '18/11/2026 15:45', posteAppelant: '1008', nomAppelant: 'Hugo Lambert', numeroAppelant: '0644556677', posteAppele: '', nomAppele: 'Partner Ltd', numeroAppele: '0344556677', direction: 'Sortant', motif: 'Répondu', duree: '2m 45s' },
+  ],
+};
+
+let charts = {};
+
+function setStatus(elId, text, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'status ' + (kind || 'ok');
+  el.style.display = text ? 'block' : 'none';
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function renderKPIs() {
+  const d = SYNTHESE_DATA;
+  document.getElementById('kpi-total-incoming').textContent = d.incoming.total;
+  document.getElementById('kpi-incoming-answered-pct').textContent = d.incoming.answeredPct + ' %';
+  document.getElementById('kpi-incoming-no-answer-pct').textContent = d.incoming.noAnswerPct;
+  document.getElementById('kpi-total-outgoing').textContent = d.outgoing.total;
+  document.getElementById('kpi-outgoing-answered-pct').textContent = d.outgoing.answeredPct + ' %';
+  document.getElementById('kpi-outgoing-no-answer-pct').textContent = d.outgoing.noAnswerPct + ' %';
+  document.getElementById('kpi-total-all').textContent = d.totals.all;
+  document.getElementById('kpi-total-answered').textContent = d.totals.answered;
+  document.getElementById('kpi-total-no-answer').textContent = d.totals.noAnswer;
+  document.getElementById('periodDisplay').textContent = d.period;
+}
+
+function renderCharts() {
+  // Graphique 1 : Appels reçus et non répondus
+  const ctx1 = document.getElementById('chart-incoming').getContext('2d');
+  if (charts['incoming']) charts['incoming'].destroy();
+  charts['incoming'] = new Chart(ctx1, {
+    type: 'line',
+    data: {
+      labels: SYNTHESE_DATA.incomingByDay.map(d => d.label),
+      datasets: [{
+        label: 'Appels reçus',
+        data: SYNTHESE_DATA.incomingByDay.map(d => d.value),
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: 'Appels reçus par jour' },
+        legend: { display: false }
+      },
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: 'Appels' }, ticks: { stepSize: 1 } },
+        x: { title: { display: true, text: 'Date' } }
+      }
+    }
+  });
+
+  // Graphique 2 : Appels sortants
+  const ctx2 = document.getElementById('chart-outgoing').getContext('2d');
+  if (charts['outgoing']) charts['outgoing'].destroy();
+  charts['outgoing'] = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels: SYNTHESE_DATA.outgoingByDay.map(d => d.label),
+      datasets: [{
+        label: 'Appels sortants',
+        data: SYNTHESE_DATA.outgoingByDay.map(d => d.value),
+        borderColor: '#059669',
+        backgroundColor: 'rgba(5, 150, 105, 0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: 'Appels sortants par jour' },
+        legend: { display: false }
+      },
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: 'Appels' }, ticks: { stepSize: 1 } },
+        x: { title: { display: true, text: 'Date' } }
+      }
+    }
+  });
+}
+
+function renderCallsTable() {
+  const container = document.getElementById('calls-table');
+  const rows = SYNTHESE_DATA.calls;
+  const dirLabels = { Entrant: 'Entrant', Sortant: 'Sortant', Interne: 'Interne' };
+  const motifLabels = { Répondu: 'Répondu', 'Sans réponse': 'Sans réponse', Annulé: 'Annulé', Rejeté: 'Rejeté' };
+
+  let html = '<table class="data"><thead><tr>';
+  html += '<th>Début</th><th>Poste appelant</th><th>Nom appelant</th><th>Numéro appelant</th>';
+  html += '<th>Poste appelé</th><th>Nom appelé</th><th>Numéro appelé</th>';
+  html += '<th>Direction</th><th>Motif fin</th><th>Durée</th>';
+  html += '</tr></thead><tbody>';
+  for (const r of rows) {
+    html += '<tr>';
+    html += '<td>' + escapeHtml(r.debut) + '</td>';
+    html += '<td>' + escapeHtml(r.posteAppelant) + '</td>';
+    html += '<td>' + escapeHtml(r.nomAppelant) + '</td>';
+    html += '<td>' + escapeHtml(r.numeroAppelant) + '</td>';
+    html += '<td>' + escapeHtml(r.posteAppele) + '</td>';
+    html += '<td>' + escapeHtml(r.nomAppele) + '</td>';
+    html += '<td>' + escapeHtml(r.numeroAppele) + '</td>';
+    html += '<td><span class="badge ' + (r.direction === 'Entrant' ? 'ok' : r.direction === 'Sortant' ? 'success' : 'neutral') + '">' + dirLabels[r.direction] + '</span></td>';
+    html += '<td><span class="badge ' + (r.motif === 'Répondu' ? 'ok' : 'warn') + '">' + motifLabels[r.motif] + '</span></td>';
+    html += '<td>' + escapeHtml(r.duree) + '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function init() {
+  renderKPIs();
+  renderCharts();
+  renderCallsTable();
+  setStatus('status-table', SYNTHESE_DATA.calls.length + ' appel(s) affiché(s).', 'ok');
+
+  // Evenements
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    window.location.href = 'login.html';
+  });
+
+  document.getElementById('btn-fullscreen').addEventListener('click', () => {
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen();
+    }
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    // Re-render avec les données par défaut
+    init();
+  });
+
+  document.getElementById('btn-print').addEventListener('click', () => {
+    window.print();
+  });
+
+  document.getElementById('btn-export').addEventListener('click', () => {
+    const rows = SYNTHESE_DATA.calls;
+    let csv = 'Début,Poste appelant,Nom appelant,Numéro appelant,Poste appelé,Nom appelé,Numéro appelé,Direction,Motif fin,Durée\n';
+    for (const r of rows) {
+      csv += '"' + r.debut + '","' + r.posteAppelant + '","' + r.nomAppelant + '","' + r.numeroAppelant + '","' + r.posteAppele + '","' + r.nomAppele + '","' + r.numeroAppele + '","' + r.direction + '","' + r.motif + '","' + r.duree + '"\n';
+    }
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'synthese_cdr_3cx.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+init();
+</script>
+</body>
+</html>

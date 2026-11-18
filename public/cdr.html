@@ -166,6 +166,7 @@
     <span class="user-info" id="userInfo">Chargement…</span>
     <a href="index.html" class="chip" style="text-decoration:none;">&#8592; Accueil outils</a>
     <a href="admin.html" class="chip admin" id="adminLink" style="text-decoration:none; display:none;">Admin</a>
+    <a href="agents.html" class="chip" id="agentsLink" style="text-decoration:none; display:none;">Indicateurs agents</a>
     <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
   </div>
 </header>
@@ -1707,6 +1708,7 @@ async function checkSession() {
       if (u.role === 'admin') {
         document.getElementById('adminLink').style.display = 'inline-block';
       }
+      document.getElementById('agentsLink').style.display = 'inline-block';
       initColumns();
       generateSqlDetail();
       generateSqlCustom();

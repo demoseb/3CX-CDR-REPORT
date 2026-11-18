@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Indicateurs agents — Rapports CDR 3CX</title>
+  <!-- Chart.js pour les graphiques (CDN, aucune dependance native) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #15803d;
+      --danger: #dc2626;
+      --warning: #b45309;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --muted: #4b5563;
+      --radius: 0.75rem;
+      --incoming: #2563eb;
+      --outgoing: #059669;
+      --repondu: #06b6d4;
+      --nonrepondu: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    a { text-decoration: none; color: inherit; }
+
+    /* Top action bar */
+    .top-actions {
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      z-index: 50;
+    }
+    .top-actions button {
+      display: flex; align-items: center; gap: 0.4rem;
+      background: #fff; border: 1px solid var(--border); color: var(--text);
+      padding: 0.55rem 1rem; border-radius: 0.6rem; font-size: 0.9rem; font-weight: 500;
+      cursor: pointer;
+    }
+    .top-actions button:hover { background: #f9fafb; border-color: var(--primary); }
+    .top-actions button svg { width: 18px; height: 18px; fill: var(--text); }
+
+    /* Header */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.875rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; font-size: 1.125rem; font-weight: 700; color: var(--text); }
+    .brand .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 0 2px rgba(5,150,105,0.2); }
+    header h1 { font-size: 1.125rem; font-weight: 600; color: var(--text); }
+    .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #fff; }
+    .chip.ok { background: var(--success); color: #fff; }
+    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: var(--muted); }
+    button.btn { background: var(--primary); color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    button.btn:hover { background: var(--primary-dark); }
+    button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.secondary { background: #f3f4f6; color: var(--text); border: 1px solid var(--border); }
+    button.secondary:hover { background: #e5e7eb; }
+    button.danger { background: var(--danger); color: #fff; }
+    button.danger:hover { background: #b91c1c; }
+    button.success { background: var(--success); color: #fff; }
+    button.success:hover { background: #14532d; }
+    button.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    button.outline:hover { background: #eff6ff; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.8rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; }
+    button.ghost:hover { background: #f9fafb; }
+    button.ghost.active { background: #dbeafe; border-color: var(--primary); color: var(--primary-dark); }
+
+    /* Layout */
+    .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h2 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
+    .card h2 .icon { font-size: 1.1rem; }
+    .section-title { font-size: 1.125rem; font-weight: 700; color: var(--text); margin-bottom: 1rem; display:flex; align-items:center; gap:0.5rem; }
+
+    /* Period badge */
+    .period { font-size: 0.8rem; color: var(--muted); margin-left: auto; white-space: nowrap; background:#f3f4f6; padding:0.2rem 0.6rem; border-radius:0.4rem; }
+
+    /* KPI cards - 3 columns like Flower Data Synthese */
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .kpi .label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi .value { font-size: 2rem; font-weight: 700; color: var(--text); line-height: 1.1; }
+    .kpi .value.empty { color: var(--muted); }
+    .kpi .pct { font-size: 1.25rem; font-weight: 700; margin-top: 0.25rem; }
+    .kpi .pct.ok { color: var(--success); }
+    .kpi .pct.warn { color: var(--warning); }
+
+    /* Toolbar / filters */
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .toolbar-right { margin-left: auto; display: flex; gap: 0.5rem; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field label { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+    .field select, .field input {
+      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 0.45rem; font-size: 0.9rem; background: #fff;
+    }
+    .field select:focus, .field input:focus { outline: none; border-color: var(--primary); }
+
+    /* Status */
+    .status { padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .status.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .status.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+
+    /* Table */
+    table.data { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
+    table.data th, table.data td { border: 1px solid var(--border); padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+    table.data th { background: #f3f4f6; font-weight: 600; color: var(--muted); white-space: nowrap; font-size: 0.75rem; }
+    table.data tr:nth-child(even) { background: #f9fafb; }
+    table.data tr:hover { background: #f3f4f6; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: 600; }
+    .badge.ok { background: #dcfce7; color: #166534; }
+    .badge.warn { background: #fef3c7; color: #92400e; }
+    .badge.neutral { background: #e5e7eb; color: #111827; }
+
+    /* Charts */
+    .chart-container { position: relative; height: 300px; width: 100%; margin-top: 1rem; }
+    .chart-wrap { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+    @media (min-width: 768px) { .chart-wrap { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 1024px) { .chart-wrap { grid-template-columns: 1fr 1fr 1fr; } }
+    .chart-card { height: 320px; }
+
+    /* Cartes indicateurs style reference (6 panneaux) */
+    .indicator-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
+    .indicator-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .indicator-title { font-size: 0.85rem; font-weight: 700; color: var(--text); }
+    .indicator-legend { display: flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; color: var(--muted); margin-bottom: 0.25rem; }
+    .indicator-legend .dot { width: 8px; height: 8px; border-radius: 2px; }
+    .dot.teal { background: #06b6d4; }
+    .dot.red { background: #ef4444; }
+    .dot.orange { background: #f59e0b; }
+    .dot.slate { background: #1e293b; }
+    .indicator-bar { height: 120px; border: 1px dashed var(--border); border-radius: 0.5rem; position: relative; display: flex; align-items: flex-end; overflow: hidden; }
+    .indicator-bar.stacked { display: flex; align-items: stretch; }
+    .bar-segment { transition: height 0.4s ease; }
+    .bar-single { width: 40%; }
+    .bar-value { position: absolute; top: -1.2rem; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 700; color: var(--text); white-space: nowrap; }
+    .indicator-value { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-align: center; margin-top: 0.25rem; }
+    .indicator-agent { font-size: 0.65rem; color: var(--muted); text-align: center; text-transform: uppercase; letter-spacing: 0.03em; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container { padding: 1rem; }
+      header { padding: 0.75rem 1rem; flex-direction: column; align-items: stretch; }
+      .period { margin-left: 0; margin-top: 0.5rem; text-align: center; }
+      .kpi-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="top-actions">
+  <button title="Plein ecran">Plein ecran</button>
+  <button title="Reinitialisation">Reinitialisation</button>
+  <button title="Imprimer">Imprimer</button>
+  <button title="Export">Export</button>
+</div>
+
+<header>
+  <div class="brand"><div class="dot"></div><span>Exporteur CDR 3CX</span></div>
+  <h1>Indicateurs agents</h1>
+  <div class="period" id="periodDisplay">01/11/2026 — 18/11/2026</div>
+  <div class="user-bar">
+    <span id="userInfo" class="chip ok">Connecte</span>
+    <a href="cdr.html" class="chip" style="text-decoration:none;">&#8592; Rapports CDR</a>
+    <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="section-title"><span class="icon">&#128201;</span> Exploration</div>
+
+  <!-- KPI globaux (entrant / sortant) -->
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="label">Appels</div>
+      <div class="value" id="kpi-total">0</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Repondus</div>
+      <div class="value" id="kpi-repondu">0</div>
+      <div class="pct ok" id="pct-repondu">0 %</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Non repondus</div>
+      <div class="value" id="kpi-nonrepondu">0</div>
+      <div class="pct warn" id="pct-nonrepondu">0 %</div>
+    </div>
+  </div>
+
+  <!-- Cartes indicateurs style reference -->
+  <div class="indicator-grid" id="indicator-grid">
+    <!-- cartes injectees par JS -->
+  </div>
+
+  <!-- Filtres -->
+  <div class="toolbar">
+    <div class="field">
+      <label>Direction de l'appel</label>
+      <select id="filter-direction" style="width:150px;">
+        <option value="">Tout</option>
+        <option value="incoming">Entrant</option>
+        <option value="outgoing">Sortant</option>
+        <option value="internal">Interne</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Ext. Dest.</label>
+      <select id="filter-dest" style="width:140px;">
+        <option value="">Tout</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Ext. Orig.</label>
+      <select id="filter-orig" style="width:140px;">
+        <option value="">Tout</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Type d'entrant</label>
+      <select id="filter-type" style="width:140px;">
+        <option value="">Tout</option>
+        <option value="incoming">Entrant</option>
+        <option value="outgoing">Sortant</option>
+        <option value="internal">Interne</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Agent</label>
+      <select id="filter-agent" style="width:170px;">
+        <option value="">Tout</option>
+      </select>
+    </div>
+    <div style="align-self:end; display:flex; gap:0.5rem; align-items:center;">
+      <label class="field-check" style="font-size:0.8rem;cursor:pointer;">
+        <input type="checkbox" id="toggle-agent-final"> Affiches en fonction de l'agent final de l'appel
+      </label>
+    </div>
+    <div class="toolbar-right">
+      <span class="chip">Flower Data compatible</span>
+    </div>
+  </div>
+
+  <!-- Graphiques globaux -->
+  <div class="card">
+    <h2><span class="icon">&#128207;</span> Statistiques globales</h2>
+    <div class="chart-wrap">
+      <div class="chart-container chart-card">
+        <canvas id="chart-agent-evolution"></canvas>
+      </div>
+      <div class="chart-container chart-card">
+        <canvas id="chart-agent-hourly"></canvas>
+      </div>
+      <div class="chart-container chart-card">
+        <canvas id="chart-agent-weekday"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Indicateurs par agent -->
+  <div class="card">
+    <h2><span class="icon">&#128100;</span> Indicateurs par agent</h2>
+    <div id="status-agents" class="status"></div>
+    <div id="agents-grid" class="kpi-grid">
+      <!-- cartes injectees par JS -->
+    </div>
+  </div>
+
+  <!-- Tableau de detail -->
+  <div class="card">
+    <div class="recent-header">
+      <h2><span class="icon">&#128202;</span> Detail par agent</h2>
+    </div>
+    <div id="agents-table"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   Utils
+   ============================================================================ */
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+function setStatus(elId, text, kind) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'status ' + (kind || 'ok');
+  el.style.display = text ? 'block' : 'none';
+}
+
+/* Formate une duree en minutes (decimale) en texte lisible HH:MM:SS */
+function formatDurationHms(minutes) {
+  if (minutes === null || minutes === undefined || minutes === '') return '00:00:00';
+  const totalSeconds = Math.round(Number(minutes) * 60);
+  if (totalSeconds < 0) return '00:00:00';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+/* Formate une date ISO en DD/MM/YYYY */
+function formatDateShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
+}
+
+/* Libelles francais pour les motifs de fin */
+const TERMINATION_LABELS = {
+  cancelled: 'Annulé',
+  src_participant_terminated: 'Repondu (appelant a raccroche)',
+  dst_participant_terminated: 'Repondu (destinataire a raccroche)',
+  rejected: 'Rejete',
+  timeout: 'Timeout',
+  redirected: 'Redirige',
+  busy: 'Occupe',
+  no_answer: 'Sans reponse',
+  failed: 'Echec',
+  normal_clearing: 'Fin normale',
+};
+
+let charts = {};
+
+/* ============================================================================
+   Chargement des indicateurs agents
+   ============================================================================ */
+let agentsData = [];
+
+async function loadAgents() {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+
+  document.getElementById('periodDisplay').textContent = formatDateShort(sevenDaysAgo) + ' — ' + formatDateShort(now);
+
+  try {
+    const res = await fetch('/api/cdr/agents?dateFrom=' + encodeURIComponent(dateFrom) + '&dateTo=' + encodeURIComponent(dateTo));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    agentsData = Array.isArray(data) ? data : [];
+    populateAgentFilter(agentsData);
+    applyAgentFilter();
+    setStatus('status-agents', agentsData.length + ' agent(s) affiche(s).', 'ok');
+  } catch (err) {
+    console.error('Erreur chargement agents:', err);
+    setStatus('status-agents', 'Erreur chargement indicateurs agents : ' + err.message, 'err');
+    document.getElementById('agents-grid').innerHTML = '<div class="empty">Impossible de charger les indicateurs agents.</div>';
+  }
+}
+
+function renderKpi(agents) {
+  let total = 0, repondu = 0, nonrepondu = 0;
+  for (const a of agents) {
+    total += (a.appels_entrants || 0) + (a.appels_sortants || 0);
+    repondu += (a.entrants_repondus || 0) + (a.sortants_repondus || 0);
+    nonrepondu += (a.entrants_non_repondus || 0) + (a.sortants_non_repondus || 0);
+  }
+  document.getElementById('kpi-total').textContent = total;
+  document.getElementById('kpi-repondu').textContent = repondu;
+  document.getElementById('kpi-nonrepondu').textContent = nonrepondu;
+  const pctR = total > 0 ? ((repondu / total) * 100).toFixed(2) : 0;
+  const pctN = total > 0 ? ((nonrepondu / total) * 100).toFixed(2) : 0;
+  document.getElementById('pct-repondu').textContent = pctR + ' %';
+  document.getElementById('pct-nonrepondu').textContent = pctN + ' %';
+}
+
+/* Rend les 6 cartes indicateurs style reference (appels entrants/sortants, durees total/moyen) */
+function renderIndicatorCards(agents) {
+  const container = document.getElementById('indicator-grid');
+  if (!container) return;
+  const totalEnt = agents.reduce((s, a) => s + (a.appels_entrants || 0), 0);
+  const totalSort = agents.reduce((s, a) => s + (a.appels_sortants || 0), 0);
+  const reponduEnt = agents.reduce((s, a) => s + (a.entrants_repondus || 0), 0);
+  const nonreponduEnt = agents.reduce((s, a) => s + (a.entrants_non_repondus || 0), 0);
+  const reponduSort = agents.reduce((s, a) => s + (a.sortants_repondus || 0), 0);
+  const nonreponduSort = agents.reduce((s, a) => s + (a.sortants_non_repondus || 0), 0);
+  const dureeTotaleEnt = agents.reduce((s, a) => s + Number(a.duree_totale_minutes || 0), 0);
+  const dureeTotaleSort = agents.reduce((s, a) => s + Number(a.duree_totale_minutes || 0), 0);
+  const dureeMoyEnt = agents.length > 0 ? dureeTotaleEnt / agents.length : 0;
+  const dureeMoySort = agents.length > 0 ? dureeTotaleSort / agents.length : 0;
+  const agentLabel = agents.length === 1 ? (agents[0].poste || 'Inconnu') : 'Tous';
+
+  const cards = [
+    {
+      title: 'Appels entrants', legend: [{ label: 'Repondu', color: '#06b6d4', value: reponduEnt }, { label: 'Non repondu', color: '#ef4444', value: nonreponduEnt }],
+      stacked: true, total: totalEnt, agent: agentLabel,
+    },
+    {
+      title: 'Appels sortants', legend: [{ label: 'Repondu', color: '#06b6d4', value: reponduSort }, { label: 'Non repondu', color: '#ef4444', value: nonreponduSort }],
+      stacked: true, total: totalSort, agent: agentLabel,
+    },
+    {
+      title: 'Duree de conversation total', legend: [{ label: 'Total', color: '#f59e0b', value: Math.round(dureeTotaleEnt * 10) / 10 }],
+      stacked: false, total: dureeTotaleEnt, agent: agentLabel,
+    },
+    {
+      title: 'Duree de conversation total', legend: [{ label: 'Total', color: '#f59e0b', value: Math.round(dureeTotaleSort * 10) / 10 }],
+      stacked: false, total: dureeTotaleSort, agent: agentLabel,
+    },
+    {
+      title: 'Duree de conversation moyen', legend: [{ label: 'Moyen', color: '#1e293b', value: Math.round(dureeMoyEnt * 100) / 100 }],
+      stacked: false, total: dureeMoyEnt, agent: agentLabel,
+    },
+    {
+      title: 'Duree de conversation moyen', legend: [{ label: 'Moyen', color: '#1e293b', value: Math.round(dureeMoySort * 100) / 100 }],
+      stacked: false, total: dureeMoySort, agent: agentLabel,
+    },
+  ];
+
+  container.innerHTML = cards.map(c => {
+    const maxBar = Math.max(...c.legend.map(l => l.value), 1);
+    const bars = c.legend.map(l => {
+      const h = (l.value / maxBar) * 100;
+      return `<div class="bar-segment stacked" style="background:${l.color};height:${h}%;width:50%;"></div>`;
+    }).join('');
+    const singleHeight = (c.total / maxBar) * 100;
+    const singleBar = c.stacked ? '' : `<div class="bar-segment bar-single" style="background:${c.legend[0].color};height:${singleHeight}%;width:40%;margin:0 auto;"></div>`;
+    const barValue = c.stacked ? '' : `<div class="bar-value">${c.total}</div>`;
+    const legendHtml = c.legend.map(l => `<span class="dot ${l.color.replace('#','')}"></span>${l.label} ${l.value}`).join(' · ');
+    return `
+      <div class="indicator-card">
+        <div class="indicator-title">${escapeHtml(c.title)}</div>
+        <div class="indicator-legend">${legendHtml}</div>
+        <div class="indicator-bar ${c.stacked ? 'stacked' : ''}">${barValue}${singleBar}${bars}</div>
+        <div class="indicator-value">${c.total}</div>
+        <div class="indicator-agent">${escapeHtml(c.agent)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+/* Carte indicateur par agent */
+function renderAgentCard(a) {
+  const total = (a.appels_entrants || 0) + (a.appels_sortants || 0);
+  return `
+    <div class="kpi">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <div style="font-size:0.85rem;font-weight:700;color:var(--text);">${escapeHtml(a.poste || 'Inconnu')}</div>
+        <span class="badge ${total > 0 ? 'ok' : 'neutral'}">${total} appels</span>
+      </div>
+      <div style="margin-top:0.5rem; display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem;">
+        <div>
+          <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Appels entrants</div>
+          <div style="font-size:1.35rem;font-weight:700;color:var(--incoming);">${a.appels_entrants || 0}</div>
+          <div style="font-size:0.75rem;color:var(--success);">Repondu: ${a.entrants_repondus || 0}</div>
+          <div style="font-size:0.75rem;color:var(--danger);">Non repondus: ${a.entrants_non_repondus || 0}</div>
+        </div>
+        <div>
+          <div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Appels sortants</div>
+          <div style="font-size:1.35rem;font-weight:700;color:var(--outgoing);">${a.appels_sortants || 0}</div>
+          <div style="font-size:0.75rem;color:var(--success);">Repondu: ${a.sortants_repondus || 0}</div>
+          <div style="font-size:0.75rem;color:var(--danger);">Non repondus: ${a.sortants_non_repondus || 0}</div>
+        </div>
+      </div>
+      <div style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.5rem; font-size:0.8rem;color:var(--muted);">
+        Duree totale: <strong>${formatDurationHms(a.duree_totale_minutes)}</strong> &nbsp;|&nbsp;
+        Moyenne: <strong>${formatDurationHms(a.duree_moyenne_minutes)}</strong> / appel
+      </div>
+    </div>
+  `;
+}
+
+function renderAgents(agents) {
+  const container = document.getElementById('agents-grid');
+  if (!agents || agents.length === 0) {
+    container.innerHTML = '<div class="empty">Aucun agent trouve pour cette periode.</div>';
+    return;
+  }
+  container.innerHTML = agents.map(renderAgentCard).join('');
+}
+
+function renderAgentsTable(agents) {
+  const container = document.getElementById('agents-table');
+  if (!agents || agents.length === 0) {
+    container.innerHTML = '<div class="empty">Aucune donnee a afficher.</div>';
+    return;
+  }
+  const headers = ['Poste', 'Entrants', 'Repondus (E)', 'Non repondus (E)', 'Sortants', 'Repondus (S)', 'Non repondus (S)', 'Duree totale', 'Duree moyenne'];
+  const cols = ['poste','appels_entrants','entrants_repondus','entrants_non_repondus','appels_sortants','sortants_repondus','sortants_non_repondus','duree_totale_minutes','duree_moyenne_minutes'];
+  let html = '<table class="data"><thead><tr>';
+  for (const h of headers) html += '<th>' + escapeHtml(h) + '</th>';
+  html += '</tr></thead><tbody>';
+  for (const a of agents) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = a[col];
+      if (col === 'duree_totale_minutes' || col === 'duree_moyenne_minutes') val = formatDurationHms(val);
+      html += '<td>' + escapeHtml(String(val ?? '')) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+/* Remplit le select Agent avec la liste des postes trouves */
+function populateAgentFilter(agents) {
+  const select = document.getElementById('filter-agent');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Tout</option>';
+  const seen = new Set();
+  for (const a of agents) {
+    const poste = a.poste || 'Inconnu';
+    if (!poste || seen.has(poste)) continue;
+    seen.add(poste);
+    const opt = document.createElement('option');
+    opt.value = poste;
+    opt.textContent = poste;
+    select.appendChild(opt);
+  }
+  select.value = current;
+  if (!agents.find(a => (a.poste||'') === current)) select.value = '';
+}
+
+/* Filtre les donnees affichees selon l'agent selectionne */
+function applyAgentFilter() {
+  const select = document.getElementById('filter-agent');
+  const agent = select ? select.value : '';
+  const filtered = agent === '' ? agentsData : agentsData.filter(a => (a.poste || '') === agent);
+  renderIndicatorCards(filtered);
+  renderAgents(filtered);
+  renderAgentsTable(filtered);
+  renderKpi(filtered);
+  const statusEl = document.getElementById('status-agents');
+  if (statusEl) {
+    statusEl.textContent = filtered.length + ' agent(s) affiche(s)' + (agent ? ' pour ' + agent : '') + '.';
+    statusEl.className = 'status ok';
+    statusEl.style.display = 'block';
+  }
+}
+
+/* ============================================================================
+   Graphiques globaux (via /api/cdr/overview)
+   ============================================================================ */
+async function loadOverviewCharts() {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+
+  try {
+    const res = await fetch('/api/cdr/overview?dateFrom=' + encodeURIComponent(dateFrom) + '&dateTo=' + encodeURIComponent(dateTo));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+
+    // Evolution par jour
+    renderChartEvolution(data.byDay || []);
+    // Horaire (stacke repondu/non repondu)
+    renderChartHourly(data.byHour || []);
+    // Jour de semaine (stacke)
+    renderChartWeekday(data.byWeekday || []);
+  } catch (err) {
+    console.error('Erreur chargement graphiques:', err);
+  }
+}
+
+const WEEKDAY_LABELS = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+
+function renderChartEvolution(rows) {
+  const ctx = document.getElementById('chart-agent-evolution').getContext('2d');
+  if (charts['agent-evolution']) charts['agent-evolution'].destroy();
+  const labels = rows.map(r => r.jour ? formatDateShort(r.jour) : '-');
+  charts['agent-evolution'] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Appels entrants',
+        data: rows.map(r => r.entrants || 0),
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37,99,235,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+      }, {
+        label: 'Appels sortants',
+        data: rows.map(r => r.sortants || 0),
+        borderColor: '#059669',
+        backgroundColor: 'rgba(5,150,105,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Evolution du nombre d appels' }, legend: { display: true, position: 'bottom' } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: 'Appels' } }, x: { title: { display: true, text: 'Date' } } }
+    }
+  });
+}
+
+function renderChartHourly(rows) {
+  const ctx = document.getElementById('chart-agent-hourly').getContext('2d');
+  if (charts['agent-hourly']) charts['agent-hourly'].destroy();
+  const dataByHour = {};
+  for (let h = 0; h < 24; h++) dataByHour[h] = { repondu: 0, nonrepondu: 0 };
+  for (const r of rows) { dataByHour[r.heure] = { repondu: r.repondu || 0, nonrepondu: r.nonrepondu || 0 }; }
+  const labels = [], rep = [], non = [];
+  for (let h = 0; h < 24; h++) {
+    labels.push(String(h).padStart(2,'0') + ':00');
+    rep.push(dataByHour[h].repondu);
+    non.push(dataByHour[h].nonrepondu);
+  }
+  charts['agent-hourly'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Repondu',
+        data: rep,
+        backgroundColor: '#06b6d4',
+      }, {
+        label: 'Non repondu',
+        data: non,
+        backgroundColor: '#ef4444',
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Distribution horaire' }, legend: { display: true, position: 'bottom' } },
+      scales: { y: { beginAtZero: true, stacked: true, title: { display: true, text: 'Appels' } }, x: { stacked: true, title: { display: true, text: 'Heure' } } }
+    }
+  });
+}
+
+function renderChartWeekday(rows) {
+  const ctx = document.getElementById('chart-agent-weekday').getContext('2d');
+  if (charts['agent-weekday']) charts['agent-weekday'].destroy();
+  const dataByDow = {};
+  for (let d = 0; d < 7; d++) dataByDow[d] = { repondu: 0, nonrepondu: 0 };
+  for (const r of rows) { dataByDow[r.dow] = { repondu: r.repondu || 0, nonrepondu: r.nonrepondu || 0 }; }
+  const labels = WEEKDAY_LABELS;
+  const rep = [], non = [];
+  for (let d = 0; d < 7; d++) { rep.push(dataByDow[d].repondu); non.push(dataByDow[d].nonrepondu); }
+  charts['agent-weekday'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Repondu',
+        data: rep,
+        backgroundColor: '#06b6d4',
+      }, {
+        label: 'Non repondu',
+        data: non,
+        backgroundColor: '#ef4444',
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Repartition par jour' }, legend: { display: true, position: 'bottom' } },
+      scales: { y: { beginAtZero: true, stacked: true, title: { display: true, text: 'Appels' } }, x: { stacked: true, title: { display: true, text: 'Jour' } } }
+    }
+  });
+}
+
+/* ============================================================================
+   Evenements
+   ============================================================================ */
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
+  window.location.href = '/login.html';
+});
+
+/* Filtres (placeholder - rechargement) */
+document.getElementById('filter-direction').addEventListener('change', loadAgents);
+document.getElementById('filter-dest').addEventListener('change', loadAgents);
+document.getElementById('filter-orig').addEventListener('change', loadAgents);
+document.getElementById('filter-type').addEventListener('change', loadAgents);
+document.getElementById('filter-user').addEventListener('change', loadAgents);
+document.getElementById('filter-agent').addEventListener('change', applyAgentFilter);
+
+/* ============================================================================
+   Authentification au chargement
+   ============================================================================ */
+async function checkSession() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data.authenticated) {
+      const u = data.user;
+      document.getElementById('userInfo').textContent = (u.name || u.email || 'Utilisateur') + ' (' + u.role || 'user' + ')';
+      loadAgents();
+      loadOverviewCharts();
+      return;
+    }
+  } catch (e) {}
+  window.location.href = '/login.html?return=' + encodeURIComponent('/agents.html');
+}
+checkSession();
+</script>
+</body>
+</html>

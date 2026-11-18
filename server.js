@@ -175,7 +175,7 @@ app.use(session({
 
 // Sert les fichiers statiques, mais protege /cdr.html et /admin.html par authentification.
 app.use((req, res, next) => {
-  if ((req.path === '/cdr.html' || req.path === '/admin.html') && !req.session.user) {
+  if ((req.path === '/cdr.html' || req.path === '/admin.html' || req.path === '/agents.html') && !req.session.user) {
     return res.redirect('/login.html?return=' + encodeURIComponent(req.originalUrl));
   }
   next();
@@ -364,6 +364,144 @@ app.get('/api/cdr/stats', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Erreur stats CDR:', err);
     res.status(500).json({ error: 'Erreur lors du calcul des statistiques CDR', detail: String(err.message || err) });
+  }
+});
+
+// Indicateurs par agent (extension) - entree/sortie, reponses, durees (protege)
+app.get('/api/cdr/agents', requireAuth, async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    let whereClauses = [];
+    let params = [];
+    let paramIdx = 1;
+    if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
+    if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+    const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    const sql = `
+WITH agent_calls AS (
+  SELECT
+    CASE
+      WHEN c.source_participant_is_incoming THEN c.destination_dn_number
+      ELSE c.source_dn_number
+    END AS agent_extension,
+    c.source_participant_is_incoming AS is_incoming,
+    c.termination_reason,
+    EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60 AS duration_min
+  FROM public.cdroutput c
+  ${whereSql}
+)
+SELECT *
+FROM (
+  SELECT
+    agent_extension AS poste,
+    COUNT(*) FILTER (WHERE is_incoming) AS appels_entrants,
+    COUNT(*) FILTER (WHERE is_incoming AND c_termination_answered) AS entrants_repondus,
+    COUNT(*) FILTER (WHERE is_incoming AND NOT c_termination_answered) AS entrants_non_repondus,
+    COUNT(*) FILTER (WHERE NOT is_incoming) AS appels_sortants,
+    COUNT(*) FILTER (WHERE NOT is_incoming AND c_termination_answered) AS sortants_repondus,
+    COUNT(*) FILTER (WHERE NOT is_incoming AND NOT c_termination_answered) AS sortants_non_repondus,
+    COALESCE(SUM(duration_min), 0) AS duree_totale_minutes,
+    COALESCE(AVG(duration_min), 0) AS duree_moyenne_minutes
+  FROM (
+    SELECT *,
+      (termination_reason IN ('dst_participant_terminated','src_participant_terminated')) AS c_termination_answered
+    FROM agent_calls
+    WHERE agent_extension IS NOT NULL AND agent_extension <> ''
+  ) a
+  GROUP BY agent_extension
+) s
+ORDER BY (appels_entrants + appels_sortants) DESC
+LIMIT 50;
+`;
+
+    const result = await pgPool.query(sql, params);
+    const rows = (result.rows || []).map(r => ({
+      poste: r.poste,
+      appels_entrants: parseInt(r.appels_entrants, 10) || 0,
+      entrants_repondus: parseInt(r.entrants_repondus, 10) || 0,
+      entrants_non_repondus: parseInt(r.entrants_non_repondus, 10) || 0,
+      appels_sortants: parseInt(r.appels_sortants, 10) || 0,
+      sortants_repondus: parseInt(r.sortants_repondus, 10) || 0,
+      sortants_non_repondus: parseInt(r.sortants_non_repondus, 10) || 0,
+      duree_totale_minutes: parseFloat(r.duree_totale_minutes) || 0,
+      duree_moyenne_minutes: parseFloat(r.duree_moyenne_minutes) || 0,
+    }));
+    res.json(rows);
+  } catch (err) {
+    console.error('Erreur indicateurs agents:', err);
+    res.status(500).json({ error: 'Erreur lors du calcul des indicateurs agents', detail: String(err.message || err) });
+  }
+});
+
+// Vue generale entrante/sortante - evolution, horaire, journalier (protege)
+app.get('/api/cdr/overview', requireAuth, async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    let whereClauses = [];
+    let params = [];
+    let paramIdx = 1;
+    if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
+    if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+    const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    const totalCalls = await pgPool.query(
+      'SELECT COUNT(*) AS cnt FROM public.cdroutput c ' + whereSql, params);
+    const incomingCalls = await pgPool.query(
+      'SELECT COUNT(*) AS cnt FROM public.cdroutput c ' + (whereSql ? whereSql + ' AND ' : 'WHERE ') + 'c.source_participant_is_incoming = TRUE', params);
+    const outgoingCalls = await pgPool.query(
+      'SELECT COUNT(*) AS cnt FROM public.cdroutput c ' + (whereSql ? whereSql + ' AND ' : 'WHERE ') + 'c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE', params);
+
+    // Evolution quotidienne entrante/sortante
+    const byDay = await pgPool.query(
+      'SELECT DATE(c.cdr_started_at) AS jour, ' +
+      'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
+
+    // Répartition horaire (heure de debut)
+    const byHour = await pgPool.query(
+      'SELECT EXTRACT(HOUR FROM c.cdr_started_at) AS heure, ' +
+      'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
+
+    // Répartition par jour de la semaine
+    const byWeekday = await pgPool.query(
+      'SELECT EXTRACT(DOW FROM c.cdr_started_at) AS dow, ' +
+      'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
+
+    const total = parseInt(totalCalls.rows[0].cnt, 10) || 0;
+    const incoming = parseInt(incomingCalls.rows[0].cnt, 10) || 0;
+    const outgoing = parseInt(outgoingCalls.rows[0].cnt, 10) || 0;
+
+    res.json({
+      totalCalls: total,
+      incomingCalls: incoming,
+      outgoingCalls: outgoing,
+      incomingPct: total > 0 ? Math.round(incoming / total * 1000) / 10 : 0,
+      outgoingPct: total > 0 ? Math.round(outgoing / total * 1000) / 10 : 0,
+      byDay: (byDay.rows || []).map(r => ({
+        jour: r.jour,
+        entrants: parseInt(r.entrants, 10) || 0,
+        sortants: parseInt(r.sortants, 10) || 0,
+      })),
+      byHour: (byHour.rows || []).map(r => ({
+        heure: parseInt(r.heure, 10) || 0,
+        entrants: parseInt(r.entrants, 10) || 0,
+        sortants: parseInt(r.sortants, 10) || 0,
+      })),
+      byWeekday: (byWeekday.rows || []).map(r => ({
+        dow: parseInt(r.dow, 10) || 0,
+        entrants: parseInt(r.entrants, 10) || 0,
+        sortants: parseInt(r.sortants, 10) || 0,
+      })),
+    });
+  } catch (err) {
+    console.error('Erreur overview CDR:', err);
+    res.status(500).json({ error: 'Erreur lors du calcul de la vue generale', detail: String(err.message || err) });
   }
 });
 
