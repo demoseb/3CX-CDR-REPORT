@@ -547,16 +547,22 @@ function generateSqlCustom() {
   selectedCols.forEach(colKey => {
     const col = COLUMNS.find(c => c.key === colKey);
     if (!col) return;
-    if (isGrouped && col.type !== 'str') {
-      // mesure numerique : agregation
-      let aggSql;
-      if (aggMeasure === 'count') aggSql = 'COUNT(*)';
-      else if (aggMeasure === 'duration') aggSql = 'SUM(' + col.sql + ')';
-      else if (aggMeasure === 'avgDuration') aggSql = 'AVG(' + col.sql + ')';
-      selectParts.push(aggSql + ' AS ' + colKey);
+    if (isGrouped) {
+      if (col.type === 'str') {
+        // dimension : incluse dans GROUP BY et SELECT
+        selectParts.push(col.sql + ' AS ' + colKey);
+        groupParts.push(col.sql);
+      } else if (col.type === 'num' && aggMeasure !== 'count') {
+        // mesure numerique : uniquement la colonne de l'aggregation choisie
+        const targetCol = (aggMeasure === 'duration' || aggMeasure === 'avgDuration') ? 'duree_minutes' : null;
+        if (colKey === targetCol) {
+          const aggSql = aggMeasure === 'duration' ? 'SUM(' + col.sql + ')' : 'AVG(' + col.sql + ')';
+          selectParts.push(aggSql + ' AS ' + colKey);
+        }
+      }
+      // colonnes 'ts' (dates) et autres colonnes numeriques ignorees en mode groupe
     } else {
       selectParts.push(col.sql + ' AS ' + colKey);
-      if (isGrouped) groupParts.push(col.sql);
     }
   });
 
