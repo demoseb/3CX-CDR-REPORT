@@ -402,6 +402,20 @@ function formatDate(iso) {
 
 const DATE_COLS = new Set(['debut_appel', 'heure_reponse', 'fin_appel']);
 
+/* Libelles francais pour les motifs de fin d'appel (termination_reason) */
+const TERMINATION_LABELS = {
+  cancelled: 'Annulé',
+  src_participant_terminated: 'Répondu (appelant a raccroché)',
+  dst_participant_terminated: 'Répondu (destinataire a raccroché)',
+  rejected: 'Rejeté',
+  timeout: 'Timeout',
+  redirected: 'Redirigé',
+  busy: 'Occupé',
+  no_answer: 'Sans réponse',
+  failed: 'Échec',
+  normal_clearing: 'Fin normale',
+};
+
 /* ============================================================================
    Onglets
    ============================================================================ */
@@ -591,6 +605,8 @@ function renderTable(containerId, data, infoId, statusId) {
         if (!isNaN(n)) val = formatDuration(n);
       } else if (DATE_COLS.has(col) && typeof val === 'string') {
         val = formatDate(val);
+      } else if (col === 'motif_fin' && typeof val === 'string') {
+        val = TERMINATION_LABELS[val] || val;
       }
       html += '<td>' + escapeHtml(String(val)) + '</td>';
     }
