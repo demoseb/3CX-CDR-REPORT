@@ -574,7 +574,10 @@ function renderTable(containerId, data, infoId, statusId) {
       if (val === null || val === undefined) val = '';
       if (typeof val === 'object') val = JSON.stringify(val);
       // Formater les colonnes de duree en texte lisible (ex: 1m 30s)
-      if (DURATION_COLS.has(col) && typeof val === 'number') val = formatDuration(val);
+      if (DURATION_COLS.has(col)) {
+        const n = Number(val);
+        if (!isNaN(n)) val = formatDuration(n);
+      }
       html += '<td>' + escapeHtml(String(val)) + '</td>';
     }
     html += '</tr>';
@@ -735,7 +738,10 @@ async function runCustom() {
         let val = row[col];
         if (val === null || val === undefined) val = '';
         if (typeof val === 'object') val = JSON.stringify(val);
-        if (DURATION_COLS.has(col) && typeof val === 'number') val = formatDuration(val);
+        if (DURATION_COLS.has(col)) {
+          const n = Number(val);
+          if (!isNaN(n)) val = formatDuration(n);
+        }
         html += '<td>' + escapeHtml(String(val)) + '</td>';
       }
       html += '</tr>';
