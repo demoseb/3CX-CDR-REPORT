@@ -3,7 +3,6 @@ import session from 'express-session';
 import crypto from 'crypto';
 import { createServer } from 'http';
 import { Pool } from 'pg';
-import { ConfidentialClientApplication } from '@azure/msal-node';
 import fs from 'fs';
 import path from 'path';
 
@@ -33,25 +32,14 @@ function loadEnv() {
 loadEnv();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3999;
 
 // ============================================================================
-// Configuration Entra ID (Microsoft Identity Platform)
-// ============================================================================
-const ENTRA_TENANT_ID = process.env.ENTRA_TENANT_ID || '';
-const ENTRA_CLIENT_ID = process.env.ENTRA_CLIENT_ID || '';
-const ENTRA_CLIENT_SECRET = process.env.ENTRA_CLIENT_SECRET || '';
-const ENTRA_AUTHORITY = 'https://login.microsoftonline.com/' + ENTRA_TENANT_ID;
-const ENTRA_REDIRECT_URI = process.env.ENTRA_REDIRECT_URI || 'http://localhost:' + PORT + '/auth/callback';
-const ENTRA_SCOPES = (process.env.ENTRA_SCOPES || 'User.Read').split(',').map(s => s.trim()).filter(Boolean);
-const SESSION_SECRET = process.env.SESSION_SECRET || 'changez-moi-en-production';
-
-// ============================================================================
-// Configuration authentification locale (complement d'Entra ID)
-// Les utilisateurs sont stockees dans une base SQLite locale (fichier cdr_users.sqlite)
+// Configuration authentification locale (SQLite)
 // ============================================================================
 const LOCAL_AUTH_ENABLED = process.env.LOCAL_AUTH_ENABLED === 'true';
 const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'cdr_users.sqlite');
+const SESSION_SECRET = process.env.SESSION_SECRET || 'changez-moi-en-production';
 
 // Helpers de hashage PBKDF2 par utilisateur
 function generateSalt() {
@@ -74,13 +62,11 @@ async function initSqlDb() {
     },
   });
 
-  // S'assurer que le dossier existe
   const dbDir = path.dirname(SQLITE_DB_PATH);
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  // Ouvrir ou creer la base SQLite
   if (fs.existsSync(SQLITE_DB_PATH)) {
     const filebuffer = fs.readFileSync(SQLITE_DB_PATH);
     sqlDb = new SQL.Database(filebuffer);
@@ -148,7 +134,7 @@ const PG_HOST = process.env.PG_HOST || 'localhost';
 const PG_PORT = parseInt(process.env.PG_PORT || '5432', 10);
 const PG_USER = process.env.PG_USER || '';
 const PG_PASSWORD = process.env.PG_PASSWORD || '';
-const PG_DATABASE = process.env.PG_DATABASE || 'cdrdb';
+const PG_DATABASE = process.env.PG_DATABASE || '3cx';
 const PG_SSL = process.env.PG_SSL === 'true';
 
 // Pool de connexions PostgreSQL (pur JavaScript, compatible Alpine/musl)
@@ -167,20 +153,6 @@ const pgPool = new Pool({
 pgPool.on('error', (err) => {
   console.error('Erreur inattendue du pool PostgreSQL:', err.message);
 });
-
-// ============================================================================
-// Client MSAL (Confidential Client Application - flow Code d'autorisation)
-// ============================================================================
-let msalClient = null;
-if (ENTRA_CLIENT_ID && ENTRA_CLIENT_SECRET && ENTRA_TENANT_ID) {
-  msalClient = new ConfidentialClientApplication({
-    auth: {
-      clientId: ENTRA_CLIENT_ID,
-      authority: ENTRA_AUTHORITY,
-      clientSecret: ENTRA_CLIENT_SECRET,
-    },
-  });
-}
 
 // ============================================================================
 // Middlewares
@@ -235,36 +207,11 @@ function currentUser(req) {
 }
 
 // ============================================================================
-// Routes d'authentification Entra ID
+// Routes d'authentification locale
 // ============================================================================
 
-// Demarre le flux de connexion Microsoft (redirection vers login.microsoftonline.com)
-app.get('/auth/login', async (req, res) => {
-  try {
-    if (!ENTRA_CLIENT_ID || !ENTRA_TENANT_ID || !ENTRA_CLIENT_SECRET) {
-      return res.status(500).json({ error: 'Authentification Entra ID non configuree cote serveur.' });
-    }
-    const state = Math.random().toString(36).substring(2);
-    req.session.authState = state;
-    const returnTo = req.query.return || '/cdr.html';
-    req.session.authReturnTo = returnTo;
-
-    const authCodeUrlRequest = {
-      redirectUri: ENTRA_REDIRECT_URI,
-      scopes: ENTRA_SCOPES,
-      state,
-    };
-
-    const url = await msalClient.getAuthCodeUrl(authCodeUrlRequest);
-    res.redirect(url);
-  } catch (err) {
-    console.error('Erreur getAuthCodeUrl:', err);
-    res.status(500).json({ error: 'Impossible d initialiser la connexion Entra ID.' });
-  }
-});
-
 // Connexion avec un compte local (utilisateur/mot de passe confirmes cotes serveur)
-app.post('/auth/local', express.json(), async (req, res) => {
+app.post('/auth/local', async (req, res) => {
   try {
     if (!LOCAL_AUTH_ENABLED) {
       return res.status(403).json({ error: 'Authentification locale desactivee.' });
@@ -290,11 +237,8 @@ app.post('/auth/local', express.json(), async (req, res) => {
       authProvider: 'local',
       role: user.role,
     };
-    req.session.authState = undefined;
-    req.session.authReturnTo = undefined;
 
-    const redirectUrl = returnTo || req.session.authReturnTo || '/cdr.html';
-    req.session.authReturnTo = undefined;
+    const redirectUrl = returnTo || '/cdr.html';
 
     req.session.save((err) => {
       if (err) {
@@ -306,66 +250,6 @@ app.post('/auth/local', express.json(), async (req, res) => {
   } catch (err) {
     console.error('Erreur /auth/local:', err);
     res.status(500).json({ error: 'Erreur lors de la connexion locale.' });
-  }
-});
-
-// Callback Microsoft : echange le code d'autorisation contre des tokens.
-app.get('/auth/callback', async (req, res) => {
-  try {
-    const { code, state, error, error_description } = req.query;
-
-    if (error) {
-      console.error('Erreur Entra ID:', error, error_description);
-      return res.redirect('/login.html?error=' + encodeURIComponent(error_description || error));
-    }
-
-    if (!code || !state || state !== req.session.authState) {
-      return res.status(400).redirect('/login.html?error=Etat+de+connexion+invalide');
-    }
-
-    const tokenRequest = {
-      code,
-      redirectUri: ENTRA_REDIRECT_URI,
-      scopes: ENTRA_SCOPES,
-    };
-
-    const response = await msalClient.acquireTokenByCode(tokenRequest);
-    const account = response.account;
-    if (!account) {
-      return res.status(500).redirect('/login.html?error=Compte+introuvable');
-    }
-
-    // Recupere le profil utilisateur via Microsoft Graph pour avoir le nom/email.
-    let displayName = account.username || account.userPrincipalName || 'Utilisateur';
-    let email = account.userPrincipalName || '';
-    try {
-      const graphRes = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: { Authorization: 'Bearer ' + response.accessToken },
-      });
-      if (graphRes.ok) {
-        const profile = await graphRes.json();
-        displayName = profile.displayName || displayName;
-        email = profile.userPrincipalName || profile.mail || email;
-      }
-    } catch (e) {
-      console.warn('Impossible de lire le profil Graph:', e.message);
-    }
-
-    req.session.user = {
-      id: account.homeAccountId,
-      name: displayName,
-      email: email,
-      username: account.username,
-      accessToken: response.accessToken,
-    };
-    req.session.authState = undefined;
-    req.session.authReturnTo = undefined;
-
-    const returnTo = req.session.authReturnTo || '/cdr.html';
-    res.redirect(returnTo);
-  } catch (err) {
-    console.error('Erreur /auth/callback:', err);
-    res.redirect('/login.html?error=' + encodeURIComponent(err.message || 'Erreur inconnue'));
   }
 });
 
@@ -406,22 +290,20 @@ app.post('/auth/logout', (req, res) => {
 
 // Indique si un utilisateur est connecte
 app.get('/api/config', (req, res) => {
-  const entraConfigured = Boolean(ENTRA_CLIENT_ID && ENTRA_TENANT_ID && ENTRA_CLIENT_SECRET);
   res.json({
     authenticated: Boolean(req.session.user),
     methods: {
-      entra: entraConfigured,
       local: LOCAL_AUTH_ENABLED,
     },
     user: currentUser(req) ? { name: currentUser(req).name, email: currentUser(req).email, authProvider: currentUser(req).authProvider } : null,
   });
 });
 
-// Exécution directe d'un rapport CDR sur PostgreSQL (protégé)
+// Execution directe d'un rapport CDR sur PostgreSQL (protege)
 app.post('/api/cdr/query', requireAuth, async (req, res) => {
   const { sql, params = [] } = req.body || {};
   if (!sql || typeof sql !== 'string') {
-    return res.status(400).json({ error: 'Requête SQL manquante' });
+    return res.status(400).json({ error: 'Requete SQL manquante' });
   }
   try {
     const result = await pgPool.query(sql, params);
@@ -431,7 +313,7 @@ app.post('/api/cdr/query', requireAuth, async (req, res) => {
       fields: result.fields ? result.fields.map(f => ({ name: f.name, dataType: f.dataType })) : [],
     });
   } catch (err) {
-    console.error('Erreur requête CDR PostgreSQL:', err);
+    console.error('Erreur requete CDR PostgreSQL:', err);
     res.status(500).json({
       error: 'Erreur lors de l execution de la requete CDR',
       detail: String(err.message || err),
@@ -439,7 +321,7 @@ app.post('/api/cdr/query', requireAuth, async (req, res) => {
   }
 });
 
-// Test de connexion à la base PostgreSQL (protégé)
+// Test de connexion à la base PostgreSQL (protege)
 app.get('/api/cdr/health', requireAuth, async (req, res) => {
   try {
     const result = await pgPool.query('SELECT 1 AS ok, now() AS server_time');
@@ -547,7 +429,6 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
     const { id } = req.params;
     const { password, role } = req.body || {};
 
-    const existing = findUserByUsername(''); // placeholder, on verifie par id ci-dessous
     const checkStmt = sqlDb.prepare('SELECT id FROM cdr_users WHERE id = ?');
     checkStmt.bind([id]);
     if (!checkStmt.step()) {
@@ -617,8 +498,7 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
 const server = createServer(app);
 server.listen(PORT, () => {
   console.log('Serveur rapports CDR 3CX demarre sur http://localhost:' + PORT);
-  console.log('Entra ID configure : ' + Boolean(ENTRA_CLIENT_ID && ENTRA_TENANT_ID && ENTRA_CLIENT_SECRET));
-  console.log('Redirect URI Entra ID : ' + ENTRA_REDIRECT_URI);
   console.log('Authentification locale : ' + LOCAL_AUTH_ENABLED);
   console.log('Base SQLite utilisateurs : ' + SQLITE_DB_PATH);
+  console.log('PostgreSQL CDR : ' + PG_HOST + ':' + PG_PORT + '/' + PG_DATABASE);
 });
