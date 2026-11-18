@@ -11,22 +11,21 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
 COPY public ./public
 
+# Crée le repertoire pour la base SQLite (utilisateur non-root doit pouvoir ecrire)
+RUN mkdir -p /app/data
+
 # Execute en tant qu'utilisateur non-root (bonne pratique sur Alpine en production)
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN chown -R appuser:appgroup /app/data
 USER appuser
 
-EXPOSE 3000
+EXPOSE 3999
 
 # Variables d'environnement par défaut (surchargeables via docker-compose / .env)
-ENV PORT=3000
+ENV PORT=3999
 ENV NODE_ENV=production
-
-# Authentification Entra ID (Microsoft Identity Platform)
-ENV ENTRA_TENANT_ID=
-ENV ENTRA_CLIENT_ID=
-ENV ENTRA_CLIENT_SECRET=
-ENV ENTRA_REDIRECT_URI=http://localhost:3000/auth/callback
-ENV ENTRA_SCOPES=User.Read
-ENV SESSION_SECRET=changez-moi-en-production
+ENV LOCAL_AUTH_ENABLED=true
+ENV SQLITE_DB_PATH=/app/data/cdr_users.sqlite
+ENV SESSION_SECRET=changez-moi-en-production-une-chaine-longue-et-aleatoire
 
 CMD ["node", "server.js"]

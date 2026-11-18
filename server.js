@@ -321,6 +321,44 @@ app.post('/api/cdr/query', requireAuth, async (req, res) => {
   }
 });
 
+// Statistiques agregées pour le dashboard KPI (protege)
+app.get('/api/cdr/stats', requireAuth, async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    let whereClauses = [];
+    let params = [];
+    let paramIdx = 1;
+    if (dateFrom) { whereClauses.push('c.cdr_started_at >= $' + paramIdx++); params.push(dateFrom); }
+    if (dateTo) { whereClauses.push('c.cdr_started_at <= $' + paramIdx++); params.push(dateTo); }
+    const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    const totalCalls = await pgPool.query(
+      'SELECT COUNT(*) AS cnt FROM public.cdroutput c ' + whereSql, params);
+    const totalDuration = await pgPool.query(
+      'SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60), 0) AS total_min FROM public.cdroutput c ' + whereSql, params);
+    const byDirection = await pgPool.query(
+      'SELECT CASE WHEN c.source_participant_is_incoming THEN \'Entrant\' WHEN c.destination_participant_is_incoming THEN \'Sortant\' ELSE \'Interne\' END AS direction, COUNT(*) AS cnt FROM public.cdroutput c ' + whereSql + ' GROUP BY 1', params);
+    const byTermination = await pgPool.query(
+      'SELECT c.termination_reason AS motif, COUNT(*) AS cnt FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 2 DESC LIMIT 8', params);
+    const avgDuration = await pgPool.query(
+      'SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60), 0) AS avg_min FROM public.cdroutput c ' + whereSql, params);
+    const lastCall = await pgPool.query(
+      'SELECT c.cdr_started_at AS debut_appel, c.source_dn_number AS poste_appelant, c.destination_dn_number AS poste_appele FROM public.cdroutput c ' + (whereSql ? whereSql + ' AND ' : 'WHERE ') + 'c.cdr_ended_at IS NOT NULL ORDER BY c.cdr_ended_at DESC LIMIT 1', params);
+
+    res.json({
+      totalCalls: parseInt(totalCalls.rows[0].cnt, 10),
+      totalDurationMinutes: parseFloat(totalDuration.rows[0].total_min),
+      avgDurationMinutes: parseFloat(avgDuration.rows[0].avg_min),
+      byDirection: byDirection.rows.map(r => ({ direction: r.direction, count: parseInt(r.cnt, 10) })),
+      byTermination: byTermination.rows.map(r => ({ motif: r.motif, count: parseInt(r.cnt, 10) })),
+      lastCall: lastCall.rows[0] || null,
+    });
+  } catch (err) {
+    console.error('Erreur stats CDR:', err);
+    res.status(500).json({ error: 'Erreur lors du calcul des statistiques CDR', detail: String(err.message || err) });
+  }
+});
+
 // Test de connexion à la base PostgreSQL (protege)
 app.get('/api/cdr/health', requireAuth, async (req, res) => {
   try {

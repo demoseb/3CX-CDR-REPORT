@@ -9,100 +9,229 @@
   <!-- SheetJS pour l'export Excel (CDN, aucune dependance native) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #15803d;
+      --danger: #dc2626;
+      --warning: #ca8a04;
+      --bg: #f5f7fa;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --radius: 0.75rem;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f5f7fa; color: #1f2937; line-height: 1.5; }
-    header { background: #111827; color: #fff; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-    header h1 { font-size: 1.125rem; font-weight: 600; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    a { text-decoration: none; color: inherit; }
+
+    /* Header */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      color: #fff;
+      padding: 0.875rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; font-size: 1.125rem; font-weight: 700; color: #fff; }
+    .brand .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); }
+    header h1 { font-size: 1.125rem; font-weight: 600; color: #fff; }
     .chip { font-size: 0.75rem; padding: 0.15rem 0.5rem; background: #374151; border-radius: 999px; color: #fff; }
-    .chip.ok { background: #166534; color: #dcfce7; }
-    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
-    .user-info { color: #d1d5db; }
+    .chip.ok { background: var(--success); color: #dcfce7; }
+    .user-bar { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: #d1d5db; }
     .user-info strong { color: #fff; }
-    button.btn { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
-    button.btn:hover { background: #1d4ed8; }
+    button.btn { background: var(--primary); color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; }
+    button.btn:hover { background: var(--primary-dark); }
     button.btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    button.secondary { background: #e5e7eb; color: #111827; }
-    button.secondary:hover { background: #d1d5db; }
-    button.danger { background: #dc2626; color: #fff; }
+    button.secondary { background: #f3f4f6; color: var(--text); border: 1px solid var(--border); }
+    button.secondary:hover { background: #e5e7eb; }
+    button.danger { background: var(--danger); color: #fff; }
     button.danger:hover { background: #b91c1c; }
-    button.success { background: #15803d; color: #fff; }
+    button.success { background: var(--success); color: #fff; }
     button.success:hover { background: #14532d; }
-    button.outline { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+    button.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
     button.outline:hover { background: #eff6ff; }
-    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .card h3 { font-size: 1rem; margin-bottom: 0.5rem; color: #111827; display: flex; align-items: center; gap: 0.5rem; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.8rem; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; }
+    button.ghost:hover { background: #f9fafb; }
+    button.ghost.active { background: #dbeafe; border-color: var(--primary); color: var(--primary-dark); }
+
+    /* Layout */
+    .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card h3 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
     .card h3 .icon { font-size: 1.1rem; }
-    .card h4 { font-size: 0.875rem; margin-bottom: 0.35rem; color: #374151; }
+    .card h4 { font-size: 0.875rem; margin-bottom: 0.35rem; color: var(--muted); }
+
+    /* KPI cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .kpi .label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi .value { font-size: 2rem; font-weight: 700; color: var(--text); line-height: 1.1; }
+    .kpi .sub { font-size: 0.8rem; color: var(--muted); margin-top: auto; }
+    .kpi .trend { font-size: 0.75rem; font-weight: 600; margin-top: 0.2rem; }
+    .kpi .trend.up { color: var(--success); }
+    .kpi .trend.down { color: var(--danger); }
+    .kpi .trend.neutral { color: var(--muted); }
+
+    /* Grid & forms */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; }
     .field { display: flex; flex-direction: column; gap: 0.3rem; }
-    .field label { font-size: 0.75rem; font-weight: 600; color: #374151; }
+    .field label { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
     .field input, .field select, .field textarea {
-      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.45rem; font-size: 0.9rem; background: #fff;
+      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 0.45rem; font-size: 0.9rem; background: #fff;
     }
-    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #2563eb; }
-    .field small { color: #6b7280; font-size: 0.7rem; }
-    .field-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
-    .field-check input { width: auto; }
-    .result { margin-top: 1rem; border-top: 1px solid #e5e7eb; padding-top: 0.75rem; }
-    .result pre { background: #111827; color: #10b981; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.8rem; max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
-    .empty { text-align: center; color: #6b7280; padding: 2rem; }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--primary); }
+    .field small { color: var(--muted); font-size: 0.7rem; }
+    .field-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer; }
+    .field-check input { width: auto; cursor: pointer; }
+    .grouped-fields { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .chip-select { padding: 0.2rem 0.6rem; border: 1px solid var(--border); border-radius: 999px; background: #fff; font-size: 0.8rem; cursor: pointer; }
+    .chip-select.active { border-color: var(--primary); background: #dbeafe; color: var(--primary-dark); }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .presets { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+
+    /* Status */
+    .result { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+    .empty { text-align: center; color: var(--muted); padding: 2rem; }
     .status { padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
     .status.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .status.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
     .status.warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-    .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #d1d5db; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
+    .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Table */
     table.data { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
-    table.data th, table.data td { border: 1px solid #e5e7eb; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
-    table.data th { background: #f3f4f6; font-weight: 600; color: #374151; white-space: nowrap; }
+    table.data th, table.data td { border: 1px solid var(--border); padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+    table.data th { background: #f3f4f6; font-weight: 600; color: var(--muted); white-space: nowrap; font-size: 0.75rem; }
     table.data tr:nth-child(even) { background: #f9fafb; }
-    .badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; }
+    table.data tr:hover { background: #f3f4f6; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; font-weight: 600; }
     .badge.ok { background: #dcfce7; color: #166534; }
     .badge.warn { background: #fef3c7; color: #92400e; }
     .badge.err { background: #fee2e2; color: #991b1b; }
-    .sql-box { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.75rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.75rem; margin-top: 0.5rem; overflow-x: auto; }
-    .flex { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-    .hint { font-size: 0.8rem; color: #6b7280; margin-top: 0.25rem; }
-    .tabs { display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem; }
-    .tab { padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; color: #6b7280; background: #fff; border-bottom: 2px solid transparent; }
-    .tab:hover { color: #2563eb; }
-    .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+    .badge.neutral { background: #e5e7eb; color: var(--muted); }
+
+    /* SQL */
+    .sql-box { background: #f3f4f6; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.75rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.75rem; margin-top: 0.5rem; overflow-x: auto; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; overflow-x: auto; }
+    .tab { padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; color: var(--muted); background: #fff; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .tab:hover { color: var(--primary); }
+    .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Charts */
     .chart-container { position: relative; height: 300px; width: 100%; margin-top: 1rem; }
     .chart-wrap { display: grid; grid-template-columns: 1fr; gap: 1rem; }
     @media (min-width: 768px) { .chart-wrap { grid-template-columns: 1fr 1fr; } }
-    .saved-reports { max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem; background: #f9fafb; }
-    .saved-item { padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    @media (min-width: 1024px) { .chart-wrap { grid-template-columns: 1fr 1fr 1fr; } }
+    .chart-card { height: 320px; }
+
+    /* Saved reports */
+    .saved-reports { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.5rem; background: #f9fafb; }
+    .saved-item { padding: 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
     .saved-item:hover { background: #f3f4f6; }
     .saved-item:last-child { border-bottom: none; }
-    .grouped-fields { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
-    .chip-select { padding: 0.2rem 0.6rem; border: 1px solid #d1d5db; border-radius: 999px; background: #fff; font-size: 0.8rem; cursor: pointer; }
-    .chip-select.active { border-color: #2563eb; background: #eff6ff; color: #2563eb; }
-    .toolbar { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+
+    /* Live indicator */
+    .live { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600; color: var(--success); }
+    .live-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Recent calls */
+    .recent-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container { padding: 1rem; }
+      header { padding: 0.75rem 1rem; }
+      .user-bar { gap: 0.5rem; }
+    }
   </style>
 </head>
 <body>
 <header>
-  <strong>3CX — Rapports CDR</strong>
+  <div class="brand"><div class="dot"></div><span>3CX — Rapports CDR</span></div>
   <span class="chip">Call Detail Records</span>
   <div class="user-bar">
     <span class="user-info" id="userInfo">Chargement…</span>
-    <a href="index.html" class="chip" style="text-decoration:none;">&#8592; Outils MCP</a>
+    <a href="index.html" class="chip" style="text-decoration:none;">&#8592; Accueil outils</a>
     <a href="admin.html" class="chip admin" id="adminLink" style="text-decoration:none; display:none;">Admin</a>
     <button class="btn danger" id="btn-logout" style="padding:0.35rem 0.8rem;font-size:0.85rem;">Deconnexion</button>
   </div>
 </header>
+
 <div class="container">
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('detail')">Detail des appels</div>
-    <div class="tab" onclick="switchTab('custom')">Rapport personnalise</div>
+  <!-- ========== Vue Dashboard (accueil) ========== -->
+  <div id="view-dashboard" class="tab-content active">
+    <!-- KPI cards -->
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="label">Total appels</div>
+        <div class="value" id="kpi-total-calls">—</div>
+        <div class="sub">Appels enregistres sur la periode</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Duree totale</div>
+        <div class="value" id="kpi-total-duration">—</div>
+        <div class="sub">Temps de communication agrégé</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Duree moyenne</div>
+        <div class="value" id="kpi-avg-duration">—</div>
+        <div class="sub">Par appel</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Dernier appel</div>
+        <div class="value" id="kpi-last-call">—</div>
+        <div class="sub" id="kpi-last-call-detail"></div>
+      </div>
+    </div>
+
+    <!-- Graphiques overview -->
+    <div class="card">
+      <h3><span class="icon">&#128207;</span> Apercu des appels</h3>
+      <div class="chart-wrap">
+        <div class="chart-container chart-card">
+          <canvas id="chart-calls-by-day"></canvas>
+        </div>
+        <div class="chart-container chart-card">
+          <canvas id="chart-by-direction"></canvas>
+        </div>
+        <div class="chart-container chart-card">
+          <canvas id="chart-by-termination"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appels recents -->
+    <div class="card">
+      <div class="recent-header">
+        <h3><span class="icon">&#128202;</span> Appels recents</h3>
+        <button class="btn secondary" id="btn-open-detail">Voir le rapport detaille &#8594;</button>
+      </div>
+      <div id="recent-calls-table"></div>
+    </div>
   </div>
 
-  <!-- ========== Onglet Detail des appels ========== -->
-  <div id="tab-detail" class="tab-content active">
+  <!-- ========== Vue Rapport detaille ========== -->
+  <div id="view-detail" class="tab-content">
     <div class="toolbar">
-      <button class="btn secondary" id="btn-back-detail" onclick="location.href='index.html'">&#8592; Retour outils</button>
+      <button class="btn secondary" id="btn-back-detail" onclick="switchView('dashboard')">&#8592; Tableau de bord</button>
       <button class="btn success" id="btn-run-detail" disabled>Executer le rapport</button>
       <button class="btn secondary" id="btn-copy-sql-detail">Copier le SQL</button>
       <button class="btn secondary" id="btn-clear-detail">Effacer</button>
@@ -112,6 +241,7 @@
 
     <div class="card">
       <h3><span class="icon">&#128203;</span> Criteres de recherche CDR</h3>
+      <div class="presets" id="presets-detail"></div>
       <div class="grid">
         <div class="field">
           <label>Date debut</label>
@@ -148,7 +278,7 @@
             <option value="">Tous</option>
             <option value="dst_participant_terminated">Repondu (destinataire raccroche)</option>
             <option value="src_participant_terminated">Repondu (appelant raccroche)</option>
-            <option value="cancelle">Annule</option>
+            <option value="cancelled">Annule</option>
             <option value="rejected">Rejete</option>
             <option value="timeout">Timeout</option>
             <option value="redirected">Redirige</option>
@@ -159,7 +289,7 @@
           <input type="number" id="limit" value="100" min="1" max="1000" />
         </div>
       </div>
-      <div class="hint">Les dates sont en heure locale du serveur 3CX. Si vous ne saisissez pas de dates, les 7 derniers jours seront utilises par defaut.</div>
+      <div class="hint">Les dates sont en heure locale du serveur 3CX. Si vous ne saisissez pas de dates, les 7 derniers jours sont utilises par defaut.</div>
     </div>
 
     <div class="card">
@@ -186,10 +316,10 @@
     </div>
   </div>
 
-  <!-- ========== Onglet Rapport personnalise ========== -->
-  <div id="tab-custom" class="tab-content">
+  <!-- ========== Vue Rapport personnalise ========== -->
+  <div id="view-custom" class="tab-content">
     <div class="toolbar">
-      <button class="btn secondary" id="btn-back-custom" onclick="location.href='index.html'">&#8592; Retour outils</button>
+      <button class="btn secondary" id="btn-back-custom" onclick="switchView('dashboard')">&#8592; Tableau de bord</button>
       <button class="btn success" id="btn-run-custom">Generer le rapport</button>
       <button class="btn outline" id="btn-export-csv-custom">Exporter CSV</button>
       <button class="btn outline" id="btn-export-xlsx-custom">Exporter Excel</button>
@@ -204,9 +334,7 @@
       <div class="grid">
         <div class="field" style="grid-column: span 2;">
           <label>Mesures a afficher (colonnes)</label>
-          <div class="grouped-fields" id="columnsSelect">
-            <!-- rempli par JS -->
-          </div>
+          <div class="grouped-fields" id="columnsSelect"></div>
           <small>Cochez les colonnes a inclure dans le rapport.</small>
         </div>
         <div class="field">
@@ -269,7 +397,7 @@
           <select id="terminationCustom">
             <option value="">Tous</option>
             <option value="dst_participant_terminated">Repondu</option>
-            <option value="cancelle">Annule</option>
+            <option value="cancelled">Annule</option>
             <option value="rejected">Rejete</option>
             <option value="timeout">Timeout</option>
           </select>
@@ -286,17 +414,13 @@
       <div id="sqlPreview-custom" class="sql-box">-- Configurez le rapport ci-dessus pour generer la requete SQL.</div>
     </div>
 
-    <!-- Graphique -->
-    <div id="chartCard" class="card" style="display:none;">
+    <div id="chartCard" class="card chart-card" style="display:none;">
       <h3><span class="icon">&#128207;</span> Visualisation</h3>
-      <div class="chart-wrap">
-        <div class="chart-container">
-          <canvas id="chartCanvas"></canvas>
-        </div>
+      <div class="chart-container">
+        <canvas id="chartCanvas"></canvas>
       </div>
     </div>
 
-    <!-- Resultats -->
     <div class="result" id="resultSection-custom" style="display:none;">
       <h3>Resultats du rapport</h3>
       <div id="resultInfo-custom" class="hint"></div>
@@ -307,7 +431,6 @@
       </div>
     </div>
 
-    <!-- Rapports enregistres -->
     <div class="card">
       <h3><span class="icon">&#128196;</span> Rapports enregistres</h3>
       <p class="hint">Enregistrez vos configurations de rapports pour les recharger plus tard (stocke localement dans votre navigateur).</p>
@@ -351,6 +474,7 @@ const GROUP_BY_OPTIONS = {
 };
 
 let chartInstance = null;
+let charts = {};
 
 /* ============================================================================
    Utils
@@ -390,7 +514,7 @@ function formatDuration(minutes) {
 
 const DURATION_COLS = new Set(['duree_minutes', 'duree_facturable_source', 'duree_facturable_destination']);
 
-/* Formate une date/heure ISO (ex: 2026-11-16T12:28:02.574Z) en texte lisible en francais.
+/* Formate une date/heure ISO en texte lisible en francais.
    Ex: 16/11/2026 12:28 */
 function formatDate(iso) {
   if (!iso) return '';
@@ -398,6 +522,14 @@ function formatDate(iso) {
   if (isNaN(d.getTime())) return iso;
   const pad = (n) => String(n).padStart(2, '0');
   return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function formatDateShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
 }
 
 const DATE_COLS = new Set(['debut_appel', 'heure_reponse', 'fin_appel']);
@@ -417,17 +549,231 @@ const TERMINATION_LABELS = {
 };
 
 /* ============================================================================
-   Onglets
+   Navigation entre vues
    ============================================================================ */
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+function switchView(view) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  document.querySelector('.tab[onclick="switchTab(\'' + tab + '\')"]').classList.add('active');
-  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('view-' + view).classList.add('active');
+  if (view === 'dashboard') {
+    loadDashboard();
+  }
 }
 
 /* ============================================================================
-   Initialisation colonnes (onglet personnalise)
+   Dashboard - KPI et graphiques apercu
+   ============================================================================ */
+async function loadDashboard() {
+  // Dates par defaut : 7 derniers jours
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+
+  try {
+    const res = await fetch('/api/cdr/stats?dateFrom=' + encodeURIComponent(dateFrom) + '&dateTo=' + encodeURIComponent(dateTo));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+
+    // KPI
+    document.getElementById('kpi-total-calls').textContent = data.totalCalls.toLocaleString('fr-FR');
+    document.getElementById('kpi-total-duration').textContent = formatDuration(data.totalDurationMinutes);
+    document.getElementById('kpi-avg-duration').textContent = formatDuration(data.avgDurationMinutes);
+    if (data.lastCall) {
+      document.getElementById('kpi-last-call').textContent = formatDateShort(data.lastCall.debut_appel);
+      document.getElementById('kpi-last-call-detail').textContent = data.lastCall.poste_appelant + ' -> ' + data.lastCall.poste_appele;
+    } else {
+      document.getElementById('kpi-last-call').textContent = '—';
+      document.getElementById('kpi-last-call-detail').textContent = 'Aucun appel';
+    }
+
+    // Graphique : appels par jour (7 derniers jours)
+    renderCallsByDay(data);
+
+    // Graphique : repartition par direction
+    renderByDirection(data.byDirection);
+
+    // Graphique : repartition par motif de fin
+    renderByTermination(data.byTermination);
+
+    // Appels recents (charge via detail avec limite 10)
+    loadRecentCalls();
+  } catch (err) {
+    console.error('Erreur chargement dashboard:', err);
+    setStatus('status-detail', 'Erreur chargement dashboard : ' + err.message, 'err');
+  }
+}
+
+function renderCallsByDay(stats) {
+  const ctx = document.getElementById('chart-calls-by-day').getContext('2d');
+  if (charts['calls-by-day']) charts['calls-by-day'].destroy();
+  // On n'a pas de donnees par jour depuis l'endpoint stats, on affiche un message
+  // Les vraies donnees par jour viennent du rapport personnalise (groupement par jour)
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Appels par jour',
+        data: [],
+        backgroundColor: '#2563eb',
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Appels par jour (a generer dans Rapport personnalise)' } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+function renderByDirection(data) {
+  const ctx = document.getElementById('chart-by-direction').getContext('2d');
+  if (charts['by-direction']) charts['by-direction'].destroy();
+  const labels = data.map(d => d.direction);
+  const values = data.map(d => d.count);
+  const colors = { Entrant: '#2563eb', Sortant: '#16a34a', Interne: '#ca8a04' };
+  charts['by-direction'] = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Appels par direction',
+        data: values,
+        backgroundColor: labels.map(l => colors[l] || '#6b7280'),
+        borderColor: '#fff',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Repartition par direction' } }
+    }
+  });
+}
+
+function renderByTermination(data) {
+  const ctx = document.getElementById('chart-by-termination').getContext('2d');
+  if (charts['by-termination']) charts['by-termination'].destroy();
+  const labels = data.map(d => TERMINATION_LABELS[d.motif] || d.motif);
+  const values = data.map(d => d.count);
+  charts['by-termination'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Appels par motif de fin',
+        data: values,
+        backgroundColor: '#2563eb',
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Repartition par motif de fin' } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+async function loadRecentCalls() {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const dateFrom = sevenDaysAgo.toISOString().replace('T', ' ').replace('.000Z', '');
+  const dateTo = now.toISOString().replace('T', ' ').replace('.000Z', '');
+
+  const sql = '-- Appels recents\nSELECT\n  c.cdr_started_at AS debut_appel,\n  c.cdr_ended_at AS fin_appel,\n  c.source_dn_number AS poste_appelant,\n  c.destination_dn_number AS poste_appele,\n  CASE WHEN c.source_participant_is_incoming THEN \'Entrant\' WHEN c.destination_participant_is_incoming THEN \'Sortant\' ELSE \'Interne\' END AS direction,\n  c.termination_reason AS motif_fin,\n  EXTRACT(EPOCH FROM (c.cdr_ended_at - c.cdr_started_at)) / 60 AS duree_minutes\nFROM public.cdroutput c\nLEFT JOIN public.cdrbilling b ON b.cdr_id = c.cdr_id\nWHERE c.cdr_started_at >= $1 AND c.cdr_started_at <= $2\nORDER BY c.cdr_started_at DESC\nLIMIT 10;';
+  const params = [dateFrom, dateTo];
+
+  try {
+    const res = await fetch('/api/cdr/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    renderRecentCallsTable(data.rows || []);
+  } catch (err) {
+    console.error('Erreur appels recents:', err);
+    document.getElementById('recent-calls-table').innerHTML = '<div class="empty">Impossible de charger les appels recents.</div>';
+  }
+}
+
+function renderRecentCallsTable(rows) {
+  const container = document.getElementById('recent-calls-table');
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty">Aucun appel recente.</div>';
+    return;
+  }
+  const cols = ['debut_appel', 'fin_appel', 'poste_appelant', 'poste_appele', 'direction', 'motif_fin', 'duree_minutes'];
+  let html = '<table class="data"><thead><tr>';
+  for (const col of cols) html += '<th>' + escapeHtml(col) + '</th>';
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = row[col];
+      if (val === null || val === undefined) val = '';
+      if (DURATION_COLS.has(col)) {
+        const n = Number(val);
+        if (!isNaN(n)) val = formatDuration(n);
+      } else if (DATE_COLS.has(col) && typeof val === 'string') {
+        val = formatDate(val);
+      } else if (col === 'motif_fin' && typeof val === 'string') {
+        val = TERMINATION_LABELS[val] || val;
+      }
+      html += '<td>' + escapeHtml(String(val)) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+/* ============================================================================
+   Presets de periode
+   ============================================================================ */
+function applyPreset(kind, fromId, toId) {
+  const now = new Date();
+  let from, to;
+  switch (kind) {
+    case 'today':
+      from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      to = now;
+      break;
+    case 'week':
+      from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      to = now;
+      break;
+    case 'month':
+      from = new Date(now.getFullYear(), now.getMonth(), 1);
+      to = now;
+      break;
+    case 'custom':
+      return;
+  }
+  const fmt = (d) => d.toISOString().slice(0, 16);
+  document.getElementById(fromId).value = fmt(from);
+  document.getElementById(toId).value = fmt(to);
+}
+
+function renderPresets(containerId, fromId, toId) {
+  const container = document.getElementById(containerId);
+  const presets = [
+    { label: 'Aujourd hui', kind: 'today' },
+    { label: '7 derniers jours', kind: 'week' },
+    { label: 'Ce mois ci', kind: 'month' },
+    { label: 'Personnalise', kind: 'custom' },
+  ];
+  container.innerHTML = '';
+  for (const p of presets) {
+    container.innerHTML += '<button class="ghost preset-btn" data-kind="' + p.kind + '" onclick="applyPreset(\'' + p.kind + '\', \'' + fromId + '\', \'' + toId + '\')">' + p.label + '</button>';
+  }
+}
+
+/* ============================================================================
+   Onglets / vues
    ============================================================================ */
 function initColumns() {
   const container = document.getElementById('columnsSelect');
@@ -549,18 +895,15 @@ function generateSqlCustom() {
     if (!col) return;
     if (isGrouped) {
       if (col.type === 'str') {
-        // dimension : incluse dans GROUP BY et SELECT
         selectParts.push(col.sql + ' AS ' + colKey);
         groupParts.push(col.sql);
       } else if (col.type === 'num' && aggMeasure !== 'count') {
-        // mesure numerique : uniquement la colonne de l'aggregation choisie
         const targetCol = (aggMeasure === 'duration' || aggMeasure === 'avgDuration') ? 'duree_minutes' : null;
         if (colKey === targetCol) {
           const aggSql = aggMeasure === 'duration' ? 'SUM(' + col.sql + ')' : 'AVG(' + col.sql + ')';
           selectParts.push(aggSql + ' AS ' + colKey);
         }
       }
-      // colonnes 'ts' (dates) et autres colonnes numeriques ignorees en mode groupe
     } else {
       selectParts.push(col.sql + ' AS ' + colKey);
     }
@@ -605,7 +948,6 @@ function renderTable(containerId, data, infoId, statusId) {
       let val = row[col];
       if (val === null || val === undefined) val = '';
       if (typeof val === 'object') val = JSON.stringify(val);
-      // Formater les colonnes de duree en texte lisible (ex: 1m 30s)
       if (DURATION_COLS.has(col)) {
         const n = Number(val);
         if (!isNaN(n)) val = formatDuration(n);
@@ -626,7 +968,7 @@ function renderTable(containerId, data, infoId, statusId) {
 }
 
 /* ============================================================================
-   Graphique Chart.js
+   Graphique Chart.js (rapport personnalise)
    ============================================================================ */
 function renderChart(data, groupBy, aggMeasure, chartType) {
   const card = document.getElementById('chartCard');
@@ -752,7 +1094,6 @@ async function runCustom() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
-    // Rendre le tableau avec les colonnes pertinentes
     const tableEl = document.getElementById('resultsTable-custom');
     const infoEl = document.getElementById('resultInfo-custom');
     if (!data || !data.rows || data.rows.length === 0) {
@@ -824,7 +1165,6 @@ function loadReport(id) {
   const report = getSavedReports().find(r => r.id === id);
   if (!report) return;
   const c = report.config;
-  // Restaurer les champs du formulaire personnalise
   if (c.groupBy) document.getElementById('groupBy').value = c.groupBy;
   if (c.aggMeasure) document.getElementById('aggMeasure').value = c.aggMeasure;
   if (c.chartType) document.getElementById('chartType').value = c.chartType;
@@ -835,11 +1175,10 @@ function loadReport(id) {
   if (c.direction) document.getElementById('directionCustom').value = c.direction;
   if (c.termination) document.getElementById('terminationCustom').value = c.termination;
   if (c.limit) document.getElementById('limitCustom').value = c.limit;
-  // Restaurer colonnes cochees
   document.querySelectorAll('input[name="col"]').forEach(cb => {
     cb.checked = c.columns ? c.columns.includes(cb.value) : false;
   });
-  switchTab('custom');
+  switchView('custom');
   setStatus('status-custom', 'Rapport "' + report.name + '" charge. Cliquez sur Generer le rapport.', 'ok');
 }
 function renderSavedReports() {
@@ -927,6 +1266,8 @@ document.getElementById('btn-export-xlsx-custom2').addEventListener('click', () 
 document.getElementById('btn-export-csv-detail').addEventListener('click', () => exportCSV('resultsTable-detail', 'rapport_cdr_detail.csv'));
 document.getElementById('btn-export-xlsx-detail').addEventListener('click', () => exportXLSX('resultsTable-detail', 'rapport_cdr_detail.xlsx', 'Rapport'));
 
+document.getElementById('btn-open-detail').addEventListener('click', () => switchView('detail'));
+
 document.querySelectorAll('#tab-custom input, #tab-custom select').forEach(el => {
   el.addEventListener('change', generateSqlCustom);
   el.addEventListener('input', generateSqlCustom);
@@ -949,7 +1290,9 @@ async function checkSession() {
       initColumns();
       generateSqlDetail();
       generateSqlCustom();
+      renderPresets('presets-detail', 'dateFrom', 'dateTo');
       renderSavedReports();
+      loadDashboard();
       return;
     }
   } catch (e) {}
