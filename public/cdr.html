@@ -374,6 +374,22 @@ function formatDateForSql(dt) {
   return d.toISOString().replace('T', ' ').replace('.000Z', '');
 }
 
+/* Formate une duree en minutes (decimale) en texte lisible.
+   Ex: 0.16245 -> "10s", 1.5 -> "1m 30s", 90.25 -> "1h 30m 15s" */
+function formatDuration(minutes) {
+  if (minutes === null || minutes === undefined || minutes === '') return '';
+  const totalSeconds = Math.round(Number(minutes) * 60);
+  if (totalSeconds < 0) return '';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+  if (m > 0) return m + 'm ' + s + 's';
+  return s + 's';
+}
+
+const DURATION_COLS = new Set(['duree_minutes', 'duree_facturable_source', 'duree_facturable_destination']);
+
 /* ============================================================================
    Onglets
    ============================================================================ */
@@ -557,6 +573,8 @@ function renderTable(containerId, data, infoId, statusId) {
       let val = row[col];
       if (val === null || val === undefined) val = '';
       if (typeof val === 'object') val = JSON.stringify(val);
+      // Formater les colonnes de duree en texte lisible (ex: 1m 30s)
+      if (DURATION_COLS.has(col) && typeof val === 'number') val = formatDuration(val);
       html += '<td>' + escapeHtml(String(val)) + '</td>';
     }
     html += '</tr>';
@@ -717,6 +735,7 @@ async function runCustom() {
         let val = row[col];
         if (val === null || val === undefined) val = '';
         if (typeof val === 'object') val = JSON.stringify(val);
+        if (DURATION_COLS.has(col) && typeof val === 'number') val = formatDuration(val);
         html += '<td>' + escapeHtml(String(val)) + '</td>';
       }
       html += '</tr>';
