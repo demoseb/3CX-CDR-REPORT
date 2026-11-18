@@ -230,6 +230,19 @@
       <div class="presets" id="presets-dashboard"></div>
     </div>
 
+    <!-- Import de données externes (ex: flowerdata) -->
+    <div class="card">
+      <h3><span class="icon">&#128214;</span> Importer des données externes</h3>
+      <p class="hint">Collez ici vos lignes CDR (CSV ou tabulées) depuis flowerdata ou un autre outil. Les colonnes attendues : debut_appel, heure_reponse, fin_appel, poste_appelant, nom_appelant, numero_appelant, poste_appele, nom_appele, numero_appele, direction, motif_fin, duree_minutes.</p>
+      <textarea id="import-data" rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:0.8rem;padding:0.5rem;border:1px solid var(--border);border-radius:0.45rem;"></textarea>
+      <div style="margin-top:0.5rem;">
+        <button class="btn success" id="btn-import-data">Importer et afficher</button>
+        <button class="btn secondary" id="btn-clear-import">Effacer</button>
+      </div>
+      <div id="import-status" class="status"></div>
+      <div id="import-table"></div>
+    </div>
+
     <!-- Graphiques overview -->
     <div class="card">
       <h3><span class="icon">&#128207;</span> Apercu des appels</h3>
@@ -866,6 +879,210 @@ async function applyDashboardFilters() {
   await loadDashboard(filters);
 }
 
+/* ============================================================================
+   Import de données externes (flowerdata ou autre CSV/TSV)
+   ============================================================================ */
+let importedData = null;
+
+/* Convertit une durée texte (ex: "11s", "1m 30s", "1h 30m 15s", "0s") en minutes */
+function parseDurationText(s) {
+  if (s === null || s === undefined) return 0;
+  const t = String(s).trim();
+  if (t === '' || t === '0') return 0;
+  // Déjà un nombre (minutes)
+  const n = Number(t);
+  if (!isNaN(n)) return n;
+
+  let minutes = 0;
+  const h = t.match(/(\d+)h/);
+  const m = t.match(/(\d+)m/);
+  const s2 = t.match(/(\d+)s/);
+  if (h) minutes += parseInt(h[1], 10) * 60;
+  if (m) minutes += parseInt(m[1], 10);
+  if (s2) minutes += parseInt(s2[1], 10) / 60;
+  return minutes;
+}
+
+/* Parse une date "DD/MM/YYYY HH:MM" en ISO */
+function parseFrDateTime(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  if (!t) return null;
+  const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(
+    parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10),
+    parseInt(m[4], 10), parseInt(m[5], 10), m[6] ? parseInt(m[6], 10) : 0
+  ));
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+/* Parse le texte collé (CSV ou tabulé) en lignes de données */
+function parseImportedText(text) {
+  if (!text || !text.trim()) return [];
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return [];
+  // Détecte le séparateur : tabulation prioritaire, sinon virgule
+  const sep = lines[0].includes('\t') ? '\t' : ',';
+  const header = lines[0].split(sep).map(h => h.trim().replace(/"/g, ''));
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(sep).map(c => c.trim().replace(/^"|"$/g, ''));
+    const obj = {};
+    header.forEach((h, idx) => { obj[h] = cells[idx] !== undefined ? cells[idx] : ''; });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+/* Normalise une ligne importée au format attendu par l'affichage */
+function normalizeImportedRow(row) {
+  const debut = parseFrDateTime(row.debut_appel || row['Debut appel'] || row.debut);
+  const fin = parseFrDateTime(row.fin_appel || row['Fin appel'] || row.fin);
+  const dureeMin = parseDurationText(row.duree_minutes || row['Duree (min)'] || row.duree || row['Duree']);
+  const directionRaw = (row.direction || '').toString().trim();
+  let direction = directionRaw;
+  if (directionRaw === 'Entrant' || directionRaw === 'incoming') direction = 'incoming';
+  else if (directionRaw === 'Sortant' || directionRaw === 'outgoing') direction = 'outgoing';
+  else if (directionRaw === 'Interne' || directionRaw === 'internal') direction = 'internal';
+
+  const motifRaw = (row.motif_fin || row['Motif fin'] || row.motif || '').toString().trim();
+  let motifLabel = TERMINATION_LABELS[motifRaw] || motifRaw || 'Inconnu';
+
+  return {
+    debut_appel: debut || '',
+    heure_reponse: parseFrDateTime(row.heure_reponse || row['Heure reponse']) || '',
+    fin_appel: fin || '',
+    poste_appelant: row.poste_appelant || row['Poste appelant'] || '',
+    nom_appelant: row.nom_appelant || row['Nom appelant'] || '',
+    numero_appelant: row.numero_appelant || row['Numero appelant'] || '',
+    poste_appele: row.poste_appele || row['Poste appele'] || '',
+    nom_appele: row.nom_appele || row['Nom appele'] || '',
+    numero_appele: row.numero_appele || row['Numero appele'] || '',
+    direction: direction,
+    motif_fin: motifRaw,
+    motif_fin_label: motifLabel,
+    duree_minutes: dureeMin,
+    duree_text: formatDuration(dureeMin),
+  };
+}
+
+function renderImportedTable(rows) {
+  const container = document.getElementById('import-table');
+  if (!rows || rows.length === 0) {
+    container.innerHTML = '<div class="empty">Aucune donnée importée.</div>';
+    return;
+  }
+  const cols = ['debut_appel', 'poste_appelant', 'nom_appelant', 'numero_appelant', 'poste_appele', 'nom_appele', 'numero_appele', 'direction', 'motif_fin_label', 'duree_text'];
+  const labels = ['Début', 'Poste appelant', 'Nom appelant', 'Numéro appelant', 'Poste appelé', 'Nom appelé', 'Numéro appelé', 'Direction', 'Motif fin', 'Durée'];
+  let html = '<table class="data"><thead><tr>';
+  for (const l of labels) html += '<th>' + escapeHtml(l) + '</th>';
+  html += '</tr></thead><tbody>';
+  for (const row of rows) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = row[col] || '';
+      if (col === 'direction') {
+        const d = { incoming: 'Entrant', outgoing: 'Sortant', internal: 'Interne' }[val] || val;
+        val = d;
+      }
+      html += '<td>' + escapeHtml(String(val)) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function computeImportedStats(rows) {
+  const totalCalls = rows.length;
+  const totalDuration = rows.reduce((s, r) => s + (r.duree_minutes || 0), 0);
+  const avgDuration = totalCalls > 0 ? totalDuration / totalCalls : 0;
+
+  const byDirection = {};
+  const byTermination = {};
+  const byDay = {};
+  const byCaller = {};
+
+  for (const r of rows) {
+    const dir = r.direction || 'inconnu';
+    byDirection[dir] = (byDirection[dir] || 0) + 1;
+
+    const motif = r.motif_fin_label || 'Inconnu';
+    byTermination[motif] = (byTermination[motif] || 0) + 1;
+
+    const day = r.debut_appel ? new Date(r.debut_appel).toLocaleDateString('fr-FR') : 'Inconnu';
+    byDay[day] = (byDay[day] || 0) + 1;
+
+    const caller = r.numero_appelant || r.poste_appelant || 'Inconnu';
+    byCaller[caller] = (byCaller[caller] || 0) + 1;
+  }
+
+  const lastCall = rows.slice().sort((a, b) => (b.debut_appel || '').localeCompare(a.debut_appel || ''))[0] || null;
+
+  return {
+    totalCalls,
+    totalDurationMinutes: totalDuration,
+    avgDurationMinutes: avgDuration,
+    byDirection: Object.entries(byDirection).map(([direction, count]) => ({ direction, count })),
+    byTermination: Object.entries(byTermination).map(([motif, count]) => ({ motif, count })),
+    byDay: Object.entries(byDay).map(([label, value]) => ({ label, value })).sort(),
+    topCallers: Object.entries(byCaller).map(([numero_appelant, nb_appels]) => ({ numero_appelant, nb_appels })).sort((a, b) => b.nb_appels - a.nb_appels).slice(0, 10),
+    lastCall,
+  };
+}
+
+function applyImportedStats(stats) {
+  document.getElementById('kpi-total-calls').textContent = stats.totalCalls.toLocaleString('fr-FR');
+  document.getElementById('kpi-total-duration').textContent = formatDuration(stats.totalDurationMinutes);
+  document.getElementById('kpi-avg-duration').textContent = formatDuration(stats.avgDurationMinutes);
+  if (stats.lastCall) {
+    document.getElementById('kpi-last-call').textContent = formatDateShort(stats.lastCall.debut_appel);
+    document.getElementById('kpi-last-call-detail').textContent = stats.lastCall.poste_appelant + ' -> ' + stats.lastCall.poste_appele;
+  } else {
+    document.getElementById('kpi-last-call').textContent = '—';
+    document.getElementById('kpi-last-call-detail').textContent = 'Aucun appel';
+  }
+
+  renderCallsByDay(stats.byDay);
+  renderByDirection(stats.byDirection);
+  renderByTermination(stats.byTermination);
+  renderTopCallersFromImported(stats.topCallers);
+}
+
+function renderTopCallersFromImported(rows) {
+  const ctx = document.getElementById('chart-top-callers').getContext('2d');
+  if (charts['top-callers']) charts['top-callers'].destroy();
+  const data = (rows || []).slice().sort((a, b) => (b.nb_appels || 0) - (a.nb_appels || 0)).slice(0, 10);
+  data.reverse();
+  const labels = data.map(r => (r.numero_appelant || 'Inconnu').toString());
+  const values = data.map(r => parseInt(r.nb_appels, 10) || 0);
+  charts['top-callers'] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Nombre d appels',
+        data: values,
+        backgroundColor: '#16a34a',
+        borderColor: '#16a34a',
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { title: { display: true, text: 'Top numéros appelants' } },
+      scales: {
+        x: { beginAtZero: true, title: { display: true, text: 'Appels' } },
+        y: { title: { display: true, text: 'Numéro appelant' } }
+      }
+    }
+  });
+}
+
 function renderRecentCallsTable(rows) {
   const container = document.getElementById('recent-calls-table');
   if (!rows || rows.length === 0) {
@@ -1440,6 +1657,34 @@ document.getElementById('btn-reset-dash').addEventListener('click', () => {
   document.getElementById('dash-dateTo').value = '';
   document.getElementById('dash-extension').value = '';
   document.getElementById('dash-direction').value = '';
+  loadDashboard();
+});
+
+document.getElementById('btn-import-data').addEventListener('click', () => {
+  const textarea = document.getElementById('import-data');
+  const text = textarea.value || '';
+  const rows = parseImportedText(text);
+  if (rows.length === 0) {
+    document.getElementById('import-status').textContent = 'Aucune ligne détectée.';
+    document.getElementById('import-status').className = 'status err';
+    document.getElementById('import-status').style.display = 'block';
+    return;
+  }
+  const normalized = rows.map(r => normalizeImportedRow(r));
+  importedData = normalized;
+  renderImportedTable(normalized);
+  const stats = computeImportedStats(normalized);
+  applyImportedStats(stats);
+  document.getElementById('import-status').textContent = normalized.length + ' ligne(s) importée(s) avec succès.';
+  document.getElementById('import-status').className = 'status ok';
+  document.getElementById('import-status').style.display = 'block';
+});
+
+document.getElementById('btn-clear-import').addEventListener('click', () => {
+  document.getElementById('import-data').value = '';
+  document.getElementById('import-table').innerHTML = '';
+  document.getElementById('import-status').style.display = 'none';
+  importedData = null;
   loadDashboard();
 });
 
