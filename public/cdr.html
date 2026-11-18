@@ -390,6 +390,18 @@ function formatDuration(minutes) {
 
 const DURATION_COLS = new Set(['duree_minutes', 'duree_facturable_source', 'duree_facturable_destination']);
 
+/* Formate une date/heure ISO (ex: 2026-11-16T12:28:02.574Z) en texte lisible en francais.
+   Ex: 16/11/2026 12:28 */
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+const DATE_COLS = new Set(['debut_appel', 'heure_reponse', 'fin_appel']);
+
 /* ============================================================================
    Onglets
    ============================================================================ */
@@ -577,6 +589,8 @@ function renderTable(containerId, data, infoId, statusId) {
       if (DURATION_COLS.has(col)) {
         const n = Number(val);
         if (!isNaN(n)) val = formatDuration(n);
+      } else if (DATE_COLS.has(col) && typeof val === 'string') {
+        val = formatDate(val);
       }
       html += '<td>' + escapeHtml(String(val)) + '</td>';
     }
