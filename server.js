@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 // Charge le fichier .env (variables non definies dans l'environnement uniquement)
 function loadEnv() {
@@ -39,7 +40,14 @@ const PORT = process.env.PORT || 3999;
 // ============================================================================
 const LOCAL_AUTH_ENABLED = process.env.LOCAL_AUTH_ENABLED === 'true';
 const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'cdr_users.sqlite');
-const SESSION_SECRET = process.env.SESSION_SECRET || 'changez-moi-en-production';
+// Secret de session : si non defini dans .env, on en genere un aleatoire au demarrage.
+// Les sessions seront invalidees a chaque redemarrage, mais aucun attaquant ne peut
+// forger de cookie avec un secret connu (l'ancien defaut 'changez-moi-en-production' etait dangereux).
+let SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  SESSION_SECRET = crypto.randomBytes(32).toString('hex');
+  console.warn('ATTENTION: SESSION_SECRET non defini dans .env — secret aleatoire genere (sessions invalidees au redemarrage). Definissez SESSION_SECRET dans .env pour la production.');
+}
 
 // Helpers de hashage PBKDF2 par utilisateur
 function generateSalt() {
@@ -56,10 +64,9 @@ let sqlInitialized = false;
 async function initSqlDb() {
   if (sqlInitialized) return;
   const initSqlJs = (await import('sql.js')).default;
+  const sqlJsDistDir = path.join(process.cwd(), 'node_modules', 'sql.js', 'dist');
   const SQL = await initSqlJs({
-    locateFile: (file) => {
-      return new URL('file:///' + process.cwd() + '/node_modules/sql.js/dist/' + file).href;
-    },
+    locateFile: (file) => pathToFileURL(path.join(sqlJsDistDir, file)).href,
   });
 
   const dbDir = path.dirname(SQLITE_DB_PATH);
@@ -173,9 +180,10 @@ app.use(session({
   },
 }));
 
-// Sert les fichiers statiques, mais protege /cdr.html et /admin.html par authentification.
+// Sert les fichiers statiques, mais protege les pages du tableau de bord par authentification.
+const PROTECTED_PAGES = new Set(['/cdr.html', '/admin.html', '/agents.html', '/synthese.html', '/index.html']);
 app.use((req, res, next) => {
-  if ((req.path === '/cdr.html' || req.path === '/admin.html' || req.path === '/agents.html') && !req.session.user) {
+  if (PROTECTED_PAGES.has(req.path) && !req.session.user) {
     return res.redirect('/login.html?return=' + encodeURIComponent(req.originalUrl));
   }
   next();
@@ -210,6 +218,31 @@ function currentUser(req) {
 // Routes d'authentification locale
 // ============================================================================
 
+// Rate limiting simple en memoire sur les tentatives de connexion (anti brute force).
+// Cle = IP + username : 5 tentatives max par fenetre de 15 minutes.
+const loginAttempts = new Map();
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+function isLoginRateLimited(key) {
+  const now = Date.now();
+  const entry = loginAttempts.get(key);
+  if (!entry || now - entry.first > LOGIN_WINDOW_MS) {
+    loginAttempts.set(key, { count: 1, first: now });
+    return false;
+  }
+  entry.count++;
+  return entry.count > LOGIN_MAX_ATTEMPTS;
+}
+
+// Nettoyage periodique des entrees expirees (toutes les minutes, ne bloque pas l'arret)
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of loginAttempts) {
+    if (now - v.first > LOGIN_WINDOW_MS) loginAttempts.delete(k);
+  }
+}, 60 * 1000).unref();
+
 // Connexion avec un compte local (utilisateur/mot de passe confirmes cotes serveur)
 app.post('/auth/local', async (req, res) => {
   try {
@@ -222,6 +255,12 @@ app.post('/auth/local', async (req, res) => {
     const { username, password, returnTo } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: 'Utilisateur et mot de passe requis.' });
+    }
+
+    // Anti brute force : bloque apres 5 echecs par IP+utilisateur sur 15 minutes
+    const rlKey = (req.ip || 'unknown') + '|' + username;
+    if (isLoginRateLimited(rlKey)) {
+      return res.status(429).json({ error: 'Trop de tentatives de connexion. Reessayez dans 15 minutes.' });
     }
 
     const user = verifyLocalUser(username, password);
@@ -299,11 +338,29 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// Execution directe d'un rapport CDR sur PostgreSQL (protege)
+// Verifie qu'une requete SQL est un SELECT en lecture seule (pas de modification de donnees,
+// pas de multi-statement). Empeche DROP/DELETE/UPDATE/INSERT et l'execution de plusieurs requetes.
+function isReadOnlySelect(sql) {
+  const cleaned = String(sql)
+    .replace(/--[^\n\r]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .trim();
+  if (!/^select\b/i.test(cleaned)) return false;
+  if (/;\s*\S/.test(cleaned)) return false;
+  return true;
+}
+
+// Execution directe d'un rapport CDR sur PostgreSQL (protege, SELECT uniquement)
 app.post('/api/cdr/query', requireAuth, async (req, res) => {
   const { sql, params = [] } = req.body || {};
   if (!sql || typeof sql !== 'string') {
     return res.status(400).json({ error: 'Requete SQL manquante' });
+  }
+  if (!isReadOnlySelect(sql)) {
+    return res.status(403).json({ error: 'Seules les requetes SELECT en lecture seule sont autorisees.' });
+  }
+  if (!Array.isArray(params)) {
+    return res.status(400).json({ error: 'params doit etre un tableau' });
   }
   try {
     const result = await pgPool.query(sql, params);
@@ -452,25 +509,34 @@ app.get('/api/cdr/overview', requireAuth, async (req, res) => {
     const outgoingCalls = await pgPool.query(
       'SELECT COUNT(*) AS cnt FROM public.cdroutput c ' + (whereSql ? whereSql + ' AND ' : 'WHERE ') + 'c.source_participant_is_incoming = FALSE AND c.destination_participant_is_incoming = FALSE', params);
 
-    // Evolution quotidienne entrante/sortante
+    // Motif "repondu" : l'un des deux participants a raccroche normalement
+    const ANSWERED = "c.termination_reason IN ('dst_participant_terminated','src_participant_terminated')";
+
+    // Evolution quotidienne entrante/sortante + repondu/non repondu
     const byDay = await pgPool.query(
       'SELECT DATE(c.cdr_started_at) AS jour, ' +
       'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
-      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants, ' +
+      'COUNT(*) FILTER (WHERE ' + ANSWERED + ') AS repondu, ' +
+      'COUNT(*) FILTER (WHERE NOT (' + ANSWERED + ')) AS nonrepondu ' +
       'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
 
-    // Répartition horaire (heure de debut)
+    // Répartition horaire (heure de debut) + repondu/non repondu
     const byHour = await pgPool.query(
       'SELECT EXTRACT(HOUR FROM c.cdr_started_at) AS heure, ' +
       'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
-      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants, ' +
+      'COUNT(*) FILTER (WHERE ' + ANSWERED + ') AS repondu, ' +
+      'COUNT(*) FILTER (WHERE NOT (' + ANSWERED + ')) AS nonrepondu ' +
       'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
 
-    // Répartition par jour de la semaine
+    // Répartition par jour de la semaine + repondu/non repondu
     const byWeekday = await pgPool.query(
       'SELECT EXTRACT(DOW FROM c.cdr_started_at) AS dow, ' +
       'COUNT(*) FILTER (WHERE c.source_participant_is_incoming) AS entrants, ' +
-      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants ' +
+      'COUNT(*) FILTER (WHERE NOT c.source_participant_is_incoming AND c.destination_participant_is_incoming = FALSE) AS sortants, ' +
+      'COUNT(*) FILTER (WHERE ' + ANSWERED + ') AS repondu, ' +
+      'COUNT(*) FILTER (WHERE NOT (' + ANSWERED + ')) AS nonrepondu ' +
       'FROM public.cdroutput c ' + whereSql + ' GROUP BY 1 ORDER BY 1 ASC', params);
 
     const total = parseInt(totalCalls.rows[0].cnt, 10) || 0;
@@ -487,16 +553,22 @@ app.get('/api/cdr/overview', requireAuth, async (req, res) => {
         jour: r.jour,
         entrants: parseInt(r.entrants, 10) || 0,
         sortants: parseInt(r.sortants, 10) || 0,
+        repondu: parseInt(r.repondu, 10) || 0,
+        nonrepondu: parseInt(r.nonrepondu, 10) || 0,
       })),
       byHour: (byHour.rows || []).map(r => ({
         heure: parseInt(r.heure, 10) || 0,
         entrants: parseInt(r.entrants, 10) || 0,
         sortants: parseInt(r.sortants, 10) || 0,
+        repondu: parseInt(r.repondu, 10) || 0,
+        nonrepondu: parseInt(r.nonrepondu, 10) || 0,
       })),
       byWeekday: (byWeekday.rows || []).map(r => ({
         dow: parseInt(r.dow, 10) || 0,
         entrants: parseInt(r.entrants, 10) || 0,
         sortants: parseInt(r.sortants, 10) || 0,
+        repondu: parseInt(r.repondu, 10) || 0,
+        nonrepondu: parseInt(r.nonrepondu, 10) || 0,
       })),
     });
   } catch (err) {
@@ -583,7 +655,11 @@ app.post('/api/admin/users', async (req, res) => {
       return res.status(409).json({ error: 'Cet utilisateur existe deja.' });
     }
 
-    const userRole = isFirstUser ? 'admin' : (role || 'user');
+    const requestedRole = isFirstUser ? 'admin' : (role || 'user');
+    if (requestedRole !== 'admin' && requestedRole !== 'user') {
+      return res.status(400).json({ error: 'Role invalide : choisissez admin ou user.' });
+    }
+    const userRole = requestedRole;
 
     const salt = generateSalt();
     const passwordHash = salt + ':' + hashPassword(password, salt);
@@ -630,6 +706,13 @@ app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
       values.push(salt + ':' + hashPassword(password, salt));
     }
     if (role !== undefined) {
+      if (role !== 'admin' && role !== 'user') {
+        return res.status(400).json({ error: 'Role invalide : choisissez admin ou user.' });
+      }
+      // Empeche un admin de modifier son propre role (evite de se verrouiller dehors)
+      if (req.session.user && ('local:' + id) === req.session.user.id) {
+        return res.status(400).json({ error: 'Impossible de modifier votre propre role.' });
+      }
       updates.push('role = ?');
       values.push(role);
     }
